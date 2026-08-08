@@ -149,6 +149,16 @@ namespace rfmechanics
         {
             if (block?.Code?.Path == null) return false;
             if (block.RequiredMiningTier != 0) return false;
+            // Assumption: every block rfmechanics registers is a spit-packed earth
+            // variant, so "domain == rfmechanics" stands in for "already spit-packed"
+            // without a second hand-maintained code list. True today (the only things
+            // this mod's domain owns are the 10 spitpacked{family} blocktypes) --
+            // silently wrong the moment rfmechanics registers any non-spit-packed block
+            // (e.g. a future decorative or crafted block), which would then be
+            // misclassified as goblin-diggable earth by every IsGoblinEarth caller
+            // (RFGoblinTunnelBehavior's tunnel-ceiling check, this file's own dig-bonus
+            // usage). If that happens, replace this with an explicit spit-packed prefix
+            // check instead of widening the domain check's scope.
             if (block.Code.Domain == "rfmechanics") return true;
             return ResolveConversionTarget(world, block) != null;
         }
