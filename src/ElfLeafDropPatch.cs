@@ -63,6 +63,19 @@ namespace rfmechanics
                 if (!isBranchy && !isPlainLeaves)
                     return;
 
+                // Naturally-generated leaves only (G2.1) -- "leaves-placed-{wood}"/
+                // "leavesbranchy-placed-{wood}" is the obtainable/replanted form (see the
+                // grown-to-placed conversion below); re-breaking a placed leaf block must not
+                // grant a second bonus drop, or elves could compound leaves indefinitely by
+                // planting and re-harvesting. Every grown-stage variant's Code.Path contains
+                // "-grown"/"-grown1".."-grown7", never "-placed-", so this single substring
+                // check is sufficient -- confirmed both leaves/normal.json and
+                // leavesbranchy/branchy.json share the identical {type: [grown..grown7,
+                // placed]} x {wood} variant cross-product (13 species, no skipVariants), so
+                // there's no species where this gate could misfire either direction.
+                if (path.Contains("-placed-"))
+                    return;
+
                 // Class guard: no class = not an elf (overrides HasTrait's
                 // null-class-returns-true default).
                 string charClass = byPlayer.Entity.WatchedAttributes.GetString("characterClass");
