@@ -455,9 +455,10 @@ public class RFMechanicsConfig
     public bool EnableGoblinTunnelSpeed { get; set; } = true;
 
     /// <summary>Walkspeed bonus applied while a goblin is under diggable earth (Soil/Sand/
-    /// Gravel-tier ceiling within 1-2 blocks overhead), Stats.Set source "tunneling". 0.12
-    /// matches TreeProximityMaxBonus's existing default almost exactly (Part A report A3).</summary>
-    public double GoblinTunnelSpeedBonus { get; set; } = 0.12;
+    /// Gravel-tier ceiling within 1-2 blocks overhead), Stats.Set source "tunneling".
+    /// Originally 0.12 (matched TreeProximityMaxBonus's existing default almost exactly,
+    /// Part A report A3); bumped to 0.15 at G2.1 review, Miles still dialing this in.</summary>
+    public double GoblinTunnelSpeedBonus { get; set; } = 0.15;
 
     /// <summary>Minimum change in the computed tunneling walkspeed value before it is
     /// re-written via Stats.Set. Mirrors RestedStatWriteThreshold/
