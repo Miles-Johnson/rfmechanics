@@ -1,19 +1,77 @@
-// Display names for the 10 spitpacked{family} blocktypes (G2/G2.1) -- these have never
-// had lang entries before, so they rendered as their raw untranslated lookup key
-// ("rfmechanics:block-spitpackedsand-peridotite") in tooltips/handbook/barrel-recipe UI.
-// Uses vanilla's own "block-{code}-*" trailing-wildcard convention (confirmed from
-// assets/game/lang/en.json: "block-bonysoil-*"/"block-forestfloor-*" cover their whole
-// variant set with one key each) for the 5 families that vary by rock/fertility/moisture,
-// rather than one entry per variant -- consolidated on purpose, not partial coverage.
+// Display names for the 10 spitpacked{family} blocktypes (G2/G2.1) -- these never had
+// lang entries at all until G2.2, when the raw untranslated key
+// ("rfmechanics:block-spitpackedsand-peridotite") showed up in a live barrel-recipe test.
+// First pass used one "block-{code}-*" wildcard entry per family (vanilla's own
+// block-bonysoil-*/block-forestfloor-* convention); replaced here with a full per-variant
+// entry for the 5 rock/fertility/moisture-varying families so the rock/fertility/moisture
+// is visible in the name (e.g. "Granite spit-packed sand", not just "Spit-packed Sand"),
+// matching vanilla's own per-variant naming style for sand-*/gravel-*/dirtygravel-*-*.
 {
-  "block-spitpackedsand-*": "Spit-packed Sand",
-  "block-spitpackedsandwavy-*": "Spit-packed Sand (Wavy)",
-  "block-spitpackedgravel-*": "Spit-packed Gravel",
-  "block-spitpackeddirtygravel-*": "Spit-packed Dirty Gravel",
-  "block-spitpackedsoil-*": "Spit-packed Soil",
-  "block-spitpackedbonysoil": "Spit-packed Bony Soil",
-  "block-spitpackedcob": "Spit-packed Cob",
-  "block-spitpackedforestfloor": "Spit-packed Forest Floor",
-  "block-spitpackedmuddygravel": "Spit-packed Muddy Gravel",
-  "block-spitpackedsludgygravel": "Spit-packed Sludgy Gravel"
+  "block-spitpackedsand-andesite": "Andesite spit-packed sand",
+  "block-spitpackedsand-chalk": "Chalk spit-packed sand",
+  "block-spitpackedsand-chert": "Chert spit-packed sand",
+  "block-spitpackedsand-conglomerate": "Conglomerate spit-packed sand",
+  "block-spitpackedsand-limestone": "Limestone spit-packed sand",
+  "block-spitpackedsand-claystone": "Claystone spit-packed sand",
+  "block-spitpackedsand-granite": "Granite spit-packed sand",
+  "block-spitpackedsand-sandstone": "Sandstone spit-packed sand",
+  "block-spitpackedsand-shale": "Shale spit-packed sand",
+  "block-spitpackedsand-basalt": "Basalt spit-packed sand",
+  "block-spitpackedsand-peridotite": "Peridotite spit-packed sand",
+  "block-spitpackedsand-phyllite": "Phyllite spit-packed sand",
+  "block-spitpackedsand-slate": "Slate spit-packed sand",
+  "block-spitpackedsand-bauxite": "Bauxite spit-packed sand",
+
+  "block-spitpackedsandwavy-andesite": "Andesite spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-chalk": "Chalk spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-chert": "Chert spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-conglomerate": "Conglomerate spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-limestone": "Limestone spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-claystone": "Claystone spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-granite": "Granite spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-sandstone": "Sandstone spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-shale": "Shale spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-basalt": "Basalt spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-peridotite": "Peridotite spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-phyllite": "Phyllite spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-slate": "Slate spit-packed sand (Wavy)",
+  "block-spitpackedsandwavy-bauxite": "Bauxite spit-packed sand (Wavy)",
+
+  "block-spitpackedgravel-andesite": "Andesite spit-packed gravel",
+  "block-spitpackedgravel-chalk": "Chalk spit-packed gravel",
+  "block-spitpackedgravel-chert": "Chert spit-packed gravel",
+  "block-spitpackedgravel-conglomerate": "Conglomerate spit-packed gravel",
+  "block-spitpackedgravel-limestone": "Limestone spit-packed gravel",
+  "block-spitpackedgravel-claystone": "Claystone spit-packed gravel",
+  "block-spitpackedgravel-granite": "Granite spit-packed gravel",
+  "block-spitpackedgravel-sandstone": "Sandstone spit-packed gravel",
+  "block-spitpackedgravel-shale": "Shale spit-packed gravel",
+  "block-spitpackedgravel-basalt": "Basalt spit-packed gravel",
+  "block-spitpackedgravel-peridotite": "Peridotite spit-packed gravel",
+  "block-spitpackedgravel-phyllite": "Phyllite spit-packed gravel",
+  "block-spitpackedgravel-slate": "Slate spit-packed gravel",
+  "block-spitpackedgravel-bauxite": "Bauxite spit-packed gravel",
+
+  "block-spitpackeddirtygravel-dry-cracked": "Dry spit-packed dirty gravel (Cracked)",
+  "block-spitpackeddirtygravel-dry-plain": "Dry spit-packed dirty gravel (Plain)",
+  "block-spitpackeddirtygravel-dry-stoney": "Dry spit-packed dirty gravel (Stoney)",
+  "block-spitpackeddirtygravel-wet-cracked": "Wet spit-packed dirty gravel (Cracked)",
+  "block-spitpackeddirtygravel-wet-plain": "Wet spit-packed dirty gravel (Plain)",
+  "block-spitpackeddirtygravel-wet-stoney": "Wet spit-packed dirty gravel (Stoney)",
+  "block-spitpackeddirtygravel-wetdark-cracked": "Wet spit-packed dirty gravel, dark (Cracked)",
+  "block-spitpackeddirtygravel-wetdark-plain": "Wet spit-packed dirty gravel, dark (Plain)",
+  "block-spitpackeddirtygravel-wetdark-stoney": "Wet spit-packed dirty gravel, dark (Stoney)",
+  "block-spitpackeddirtygravel-wetverydark-plain": "Wet spit-packed dirty gravel, very dark (Plain)",
+
+  "block-spitpackedsoil-verylow": "Barren spit-packed soil",
+  "block-spitpackedsoil-low": "Low fertility spit-packed soil",
+  "block-spitpackedsoil-medium": "Medium fertility spit-packed soil",
+  "block-spitpackedsoil-compost": "Compost spit-packed soil",
+  "block-spitpackedsoil-high": "High fertility spit-packed soil",
+
+  "block-spitpackedbonysoil": "Spit-packed bony soil",
+  "block-spitpackedcob": "Spit-packed cob",
+  "block-spitpackedforestfloor": "Spit-packed forest floor",
+  "block-spitpackedmuddygravel": "Spit-packed muddy gravel",
+  "block-spitpackedsludgygravel": "Spit-packed sludgy gravel"
 }
