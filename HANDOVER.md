@@ -240,14 +240,22 @@ never touches `raceframework`'s source or assets directly, it only calls
 
 ## Testing status
 
-- **Goblin Phase G2.2 (2026-08-08): wash-back barrel recipes, build-verified only, not
-  deployed or smoke-tested.** 10 recipe entries in `washspitpacked.json`, one per
-  spit-packed family (4 in → 3 out, 2L water consumed, instant craft). See
-  `notes/goblin-phase-g2.2-as-built.md` for the full per-family output mapping and the
-  reasoning behind the two non-obvious outputs (`spitpackedcob` → `cob-none`,
-  `spitpackedforestfloor` → `soil-low-none`, the latter matching vanilla `forestfloor`'s
-  own break-drop code rather than any `forestfloor-*` variant). `dotnet build`: 0 errors,
-  same 19-warning baseline. **Not yet deployed to the live install or smoke-tested.**
+- **Goblin Phase G2.2 (2026-08-08): wash-back barrel recipes, deployed, smoke test
+  in progress.** 10 recipe entries in `washspitpacked.json`, one per spit-packed family
+  (4 in → 3 out, 2L water consumed, instant craft). See `notes/goblin-phase-g2.2-as-built.md`
+  for the full per-family output mapping and the reasoning behind the two non-obvious
+  outputs (`spitpackedcob` → `cob-none`, `spitpackedforestfloor` → `soil-low-none`, the
+  latter matching vanilla `forestfloor`'s own break-drop code rather than any
+  `forestfloor-*` variant). `dotnet build`: 0 errors, same 19-warning baseline.
+  **First live test (2026-08-08) found `assets/rfmechanics/recipes/` and `lang/` had
+  never been deployed to the live install at all** — both now copied over; the world
+  needs a fresh load (recipes are asset-loaded once at world/save load, not hot-reloaded)
+  before re-testing. Also surfaced a **pre-existing, now-fixed gap**: none of the 10
+  spit-packed blocktypes ever had lang entries (since G1/G2), so they rendered as their
+  raw untranslated key (`rfmechanics:block-spitpackedsand-peridotite`) in tooltips —
+  fixed via `assets/rfmechanics/lang/en.json`, one wildcard entry per family matching
+  vanilla's own `block-bonysoil-*`/`block-forestfloor-*` convention. See
+  `notes/goblin-phase-g2.2-smoke-test-checklist.md` for the full re-test plan.
 - **Goblin Phase G2 (2026-08-06): six new mechanics across dig speed, climbing, tunnel
   speed, spit-packed earth conversion, and Elf leaf gathering** — see
   `notes/goblin-phase-g2-partB-as-built.md` for the original smoke-test handoff checklist
