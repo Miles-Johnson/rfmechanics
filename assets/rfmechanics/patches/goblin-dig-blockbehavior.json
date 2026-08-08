@@ -1,0 +1,92 @@
+[
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/soil/soil.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/sand.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/gravel.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors",
+        "file": "game:blocktypes/soil/packeddirt.json",
+        "value": [ { "name": "GoblinDigModifier" } ]
+    },
+    {
+        "op": "add",
+        "path": "/behaviors",
+        "file": "game:blocktypes/soil/aridpackeddirt.json",
+        "value": [ { "name": "GoblinDigModifier" } ]
+    },
+    {
+        "op": "add",
+        "path": "/behaviors",
+        "file": "game:blocktypes/soil/bony.json",
+        "value": [ { "name": "GoblinDigModifier" } ]
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/soil/bony-layered.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors",
+        "file": "game:blocktypes/soil/cob.json",
+        "value": [ { "name": "GoblinDigModifier" } ]
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/soil/forestfloor.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/soil/muddygravel.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/soil/sludgygravel.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/sand-layered.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/sand-wavy.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/gravel-layered.json",
+        "value": { "name": "GoblinDigModifier" }
+    },
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/gravel-dirty.json",
+        "value": { "name": "GoblinDigModifier" }
+    }
+]

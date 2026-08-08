@@ -1,0 +1,20 @@
+[
+    {
+        "op": "add",
+        "path": "/server/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfthew" }
+    },
+    {
+        "op": "add",
+        "path": "/server/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfband" }
+    },
+    {
+        "op": "add",
+        "path": "/server/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfburn" }
+    }
+]

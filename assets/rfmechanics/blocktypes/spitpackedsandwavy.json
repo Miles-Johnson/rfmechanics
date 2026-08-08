@@ -1,0 +1,43 @@
+{
+	code: "spitpackedsandwavy",
+	behaviors: [{ name: "GoblinDigModifier" }],
+	variantgroups: [
+		{ loadFromProperties: "block/rock", code: "rock" },
+	],
+	creativeinventory: { "general": ["*"], "terrain": ["*"] },
+	shape: { base: "survival:block/basic/cube" },
+	drawtype: "cube",
+	blockmaterial: "Sand",
+	textures: {
+		all: {
+			base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}1",
+			alternates: [
+				{ base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}2" },
+				{ base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}3" },
+				{ base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}4" },
+				{ base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}5" },
+				{ base: "block/spitpacked/sandwavy/{rock}/spitpackedsandwavy-{rock}6" }
+			]
+		}
+	},
+	attributes: {
+		mapColorCode: "desert",
+		preventsDecay: true,
+		handbook: { groupBy: ["spitpackedsandwavy-*"] }
+	},
+	replaceable: 600,
+	fertility: 10,
+	resistance: 2.2,
+	sounds: {
+		place: "survival:block/sand",
+		break: "survival:block/sand",
+		hit: "survival:block/sand",
+		walk: "survival:walk/sand"
+	},
+	heldTpIdleAnimation: "holdbothhandslarge", heldRightReadyAnimation: "heldblockready", heldTpUseAnimation: "twohandplaceblock",
+	tpHandTransform: {
+		translation: { x: -1.23, y: -0.91, z: -0.8 },
+		rotation: { x: -2, y: 25, z: -78 },
+		scale: 0.4
+	}
+}

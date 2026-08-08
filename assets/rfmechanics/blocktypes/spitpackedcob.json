@@ -1,0 +1,39 @@
+{
+	code: "spitpackedcob",
+	behaviors: [{ name: "GoblinDigModifier" }],
+	creativeinventory: { "general": ["*"], "terrain": ["*"] },
+	shape: { base: "survival:block/basic/cube" },
+	drawtype: "cube",
+	blockmaterial: "Soil",
+	textures: {
+		all: {
+			base: "block/spitpacked/cob/spitpackedcob1",
+			alternates: [
+				{ base: "block/spitpacked/cob/spitpackedcob2" },
+				{ base: "block/spitpacked/cob/spitpackedcob3" },
+				{ base: "block/spitpacked/cob/spitpackedcob4" },
+				{ base: "block/spitpacked/cob/spitpackedcob5" },
+				{ base: "block/spitpacked/cob/spitpackedcob6" }
+			]
+		}
+	},
+	attributes: {
+		mapColorCode: "settlement",
+		preventsDecay: true
+	},
+	replaceable: 400,
+	fertility: 10,
+	resistance: 2.2,
+	sounds: {
+		place: "survival:block/dirt",
+		break: "survival:block/dirt",
+		hit: "survival:block/dirt",
+		walk: "survival:walk/grass"
+	},
+	heldTpIdleAnimation: "holdbothhandslarge", heldRightReadyAnimation: "heldblockready", heldTpUseAnimation: "twohandplaceblock",
+	tpHandTransform: {
+		translation: { x: -1.23, y: -0.91, z: -0.8 },
+		rotation: { x: -2, y: 25, z: -78 },
+		scale: 0.4
+	}
+}

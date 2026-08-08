@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "rfmechanics",
+  "name": "RF Mechanics",
+  "description": "Race Framework mechanics: depth/altitude mining speed curve and ore yield scaling",
+  "version": "0.1.0",
+  "requiredOnClient": true,
+  "dependencies": {
+    "game": ">=1.21.0",
+    "survival": ">=1.21.0"
+  }
+}

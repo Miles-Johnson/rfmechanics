@@ -1,0 +1,43 @@
+{
+	code: "spitpackedgravel",
+	behaviors: [{ name: "GoblinDigModifier" }],
+	variantgroups: [
+		{ loadFromProperties: "block/rock", code: "rock" },
+	],
+	creativeinventory: { "general": ["*"], "terrain": ["*"] },
+	shape: { base: "survival:block/basic/cube" },
+	drawtype: "cube",
+	blockmaterial: "Gravel",
+	textures: {
+		all: {
+			base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}1",
+			alternates: [
+				{ base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}2" },
+				{ base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}3" },
+				{ base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}4" },
+				{ base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}5" },
+				{ base: "block/spitpacked/gravel/{rock}/spitpackedgravel-{rock}6" }
+			]
+		},
+	},
+	attributes: {
+		mapColorCode: "desert",
+		preventsDecay: true,
+		handbook: { groupBy: ["spitpackedgravel-*"] }
+	},
+	replaceable: 400,
+	fertility: 5,
+	resistance: 2.9,
+	sounds: {
+		place: "survival:block/gravel",
+		break: "survival:block/gravel",
+		hit: "survival:block/gravel",
+		walk: "survival:walk/gravel"
+	},
+	heldTpIdleAnimation: "holdbothhandslarge", heldRightReadyAnimation: "heldblockready", heldTpUseAnimation: "twohandplaceblock",
+	tpHandTransform: {
+		translation: { x: -1.23, y: -0.91, z: -0.8 },
+		rotation: { x: -2, y: 25, z: -78 },
+		scale: 0.4
+	}
+}

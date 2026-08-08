@@ -1,0 +1,28 @@
+# rfmechanics — Cline Rules
+
+## Skills
+Always invoke vs-rag-query before writing any JSON field or C# API call
+not already verified in this session.
+
+## Mod type
+[x] Code mod (C# + JSON)
+
+## Mod-specific conventions
+- ModId: rfmechanics, domain: rfmechanics
+- Side: Universal (patches run on both client and server)
+- Harmony ID: "rfmechanics"
+- Config: rfmechanics.json in ModConfig folder, loaded in Start()
+- Soft coupling to raceframework: trait code is a config string, no hard dep
+- All tuning values in config, none hardcoded
+- Stats.Set is used only by RestedBehavior, for 4 blended engine stat channels
+  (miningSpeedMul, forageDropRate, wildCropDropRate, hungerrate), source string "rested".
+  Each is written only on a >RestedStatWriteThreshold change, since Stats.Set marks
+  WatchedAttributes "stats" dirty on every call and unconditional per-tick writes cause
+  sync stutter. This is a deliberate, scoped exception for multi-source blended stats —
+  bespoke on-demand postfix math (Dwarf mining/ore curves, climb speed) still must not
+  use Stats.Set.
+- Material gate: only apply mining speed bonus to Ore/Stone blocks
+- Class guard: treat null characterClass as not-a-dwarf
+
+## Known wiki gaps for this mod
+- CharacterSystem.HasTrait (third-party mod API, not in wiki corpus)
