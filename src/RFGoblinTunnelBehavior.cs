@@ -1,4 +1,3 @@
-using System;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.MathTools;
@@ -14,14 +13,17 @@ namespace rfmechanics
     ///
     /// Condition is a narrow directional check, not RFTreeProximityBehavior's radius WalkBlocks
     /// scan: two block reads straight up from the player's head (+1, +2), checking for
-    /// diggable earth via RFMechanicsConfig.GoblinDiggableEarthCodePrefixes (Code.Path prefix
-    /// match) plus RequiredMiningTier == 0. Was originally a BlockMaterial-only check
-    /// (Soil/Sand/Gravel, tier 0), replaced because that both missed several raw-terrain
-    /// families and over-matched non-terrain Soil-material blocks that merely share the
-    /// material (food/egg, food/cheese, charcoalpile, coalpile, saltpeter). The canonical
-    /// family/bucket table for what belongs in the prefix list -- and the other two goblin-dig
-    /// consumers that must stay in sync with it -- lives in
-    /// notes/goblin-dig-materials-handover.md.
+    /// diggable earth via GoblinSpitPackingPatch.IsGoblinEarth. Was originally a
+    /// BlockMaterial-only check (Soil/Sand/Gravel, tier 0), then a standalone Code.Path
+    /// prefix list (RFMechanicsConfig.GoblinDiggableEarthCodePrefixes) because the material
+    /// check both missed several raw-terrain families and over-matched non-terrain
+    /// Soil-material blocks that merely share the material (food/egg, food/cheese,
+    /// charcoalpile, coalpile, saltpeter). **G2.1**: the standalone prefix list was itself a
+    /// second list drifting out of sync with GoblinSpitPackingPatch.ResolveConversionTarget's
+    /// own family set (5 of 10 spit-packed families were missing from it) -- removed in favor
+    /// of querying IsGoblinEarth, which is backed directly by ResolveConversionTarget plus an
+    /// rfmechanics-domain check for already-converted blocks. See
+    /// notes/goblin-dig-materials-handover.md for the drift history.
     ///
     /// Hysteresis: entering the bonus only needs the near (+1) sample to qualify; clearing it
     /// requires BOTH the near and far (+2) samples to fail, so a player standing right at a
@@ -69,7 +71,7 @@ namespace rfmechanics
                 return;
             }
 
-            UpdateHysteresis(cfg);
+            UpdateHysteresis();
 
             float walkspeed = 1f + (underEarth ? (float)cfg.GoblinTunnelSpeedBonus : 0f);
             TrySet(walkspeed, cfg);
@@ -102,17 +104,21 @@ namespace rfmechanics
         /// <summary>
         /// Two-sample directional check straight up from the player's head. Entry needs only
         /// the near sample; exit needs both samples to fail -- see class doc comment.
+        /// "Diggable earth" is now delegated to GoblinSpitPackingPatch.IsGoblinEarth (G2.1) --
+        /// this behavior no longer maintains its own Code.Path prefix list. See
+        /// notes/goblin-dig-materials-handover.md for the drift that caused (5 of 10
+        /// spit-packed families missing from the old GoblinDiggableEarthCodePrefixes list).
         /// </summary>
-        private void UpdateHysteresis(RFMechanicsConfig cfg)
+        private void UpdateHysteresis()
         {
             IBlockAccessor blockAccessor = entity.World.BlockAccessor;
             int headY = (int)System.Math.Ceiling(entity.Pos.Y + entity.CollisionBox.Y2);
             BlockPos samplePos = new BlockPos((int)entity.Pos.X, headY + 1, (int)entity.Pos.Z, entity.Pos.Dimension);
 
-            bool nearQualifies = IsDiggableEarth(blockAccessor.GetBlock(samplePos), cfg);
+            bool nearQualifies = GoblinSpitPackingPatch.IsGoblinEarth(entity.World, blockAccessor.GetBlock(samplePos));
 
             samplePos.Y = headY + 2;
-            bool farQualifies = IsDiggableEarth(blockAccessor.GetBlock(samplePos), cfg);
+            bool farQualifies = GoblinSpitPackingPatch.IsGoblinEarth(entity.World, blockAccessor.GetBlock(samplePos));
 
             if (nearQualifies)
             {
@@ -123,27 +129,6 @@ namespace rfmechanics
                 underEarth = false;
             }
             // else: near failed but far still qualifies -- hold the previous state (hysteresis buffer).
-        }
-
-        private static bool IsDiggableEarth(Block block, RFMechanicsConfig cfg)
-        {
-            if (block?.Code == null) return false;
-            if (block.RequiredMiningTier != 0) return false;
-
-            string[] prefixes = cfg.GoblinDiggableEarthCodePrefixes ?? Array.Empty<string>();
-            return MatchesAnyPrefix(block.Code.Path, prefixes);
-        }
-
-        /// <summary>Mirrors GoblinClimbingPatch.MatchesAnyPrefix exactly -- duplicated rather
-        /// than shared, since no common utility class exists yet in this codebase for a
-        /// one-liner like this (GoblinClimbingPatch has its own private copy too).</summary>
-        private static bool MatchesAnyPrefix(string path, string[] prefixes)
-        {
-            for (int i = 0; i < prefixes.Length; i++)
-            {
-                if (!string.IsNullOrEmpty(prefixes[i]) && path.StartsWith(prefixes[i])) return true;
-            }
-            return false;
         }
 
         /// <summary>

@@ -132,6 +132,27 @@ namespace rfmechanics
         /// tradeoff (dirtygravel now carries its own moisture-type suffix through instead of
         /// approximating with a permanent "granite" pick).
         /// </summary>
+        /// <summary>
+        /// Single source of truth for "is this diggable earth" for goblin purposes, shared
+        /// with RFGoblinTunnelBehavior's tunnel-ceiling check instead of that behavior
+        /// maintaining its own parallel Code.Path prefix list (RFMechanicsConfig's former
+        /// GoblinDiggableEarthCodePrefixes -- removed G2.1, see
+        /// notes/goblin-dig-materials-handover.md for the drift it caused: 5 of 10
+        /// spit-packed families were missing from that list). True if the block is either a
+        /// valid conversion source per ResolveConversionTarget, or is itself an
+        /// already-converted rfmechanics-owned spit-packed block (which ResolveConversionTarget
+        /// itself never matches -- its whole point is recognizing pre-conversion blocks).
+        /// RequiredMiningTier == 0 is checked here too (mirrors the Postfix's own guard) so
+        /// callers get a complete predicate without re-deriving that guard themselves.
+        /// </summary>
+        internal static bool IsGoblinEarth(IWorldAccessor world, Block block)
+        {
+            if (block?.Code?.Path == null) return false;
+            if (block.RequiredMiningTier != 0) return false;
+            if (block.Code.Domain == "rfmechanics") return true;
+            return ResolveConversionTarget(world, block) != null;
+        }
+
         private static Block ResolveConversionTarget(IWorldAccessor world, Block neighbor)
         {
             string path = neighbor.Code.Path;

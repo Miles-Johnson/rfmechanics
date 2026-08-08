@@ -464,29 +464,15 @@ public class RFMechanicsConfig
     /// TreeProximityStatWriteThreshold -- avoids per-tick sync writes.</summary>
     public double GoblinTunnelStatWriteThreshold { get; set; } = 0.02;
 
-    /// <summary>Code.Path prefixes treated as diggable earth for the goblin tunnel-ceiling
-    /// walkspeed check (RFGoblinTunnelBehavior.IsDiggableEarth). Replaces an earlier
-    /// BlockMaterial-only check (Soil/Sand/Gravel material, RequiredMiningTier == 0), which
-    /// both missed several raw-terrain families (bonysoil, cob, forestfloor, muddygravel,
-    /// sludgygravel, sandwavy, dirtygravel, and the "-layered" partial-height variants) and
-    /// over-matched several non-terrain Soil-material blocks that merely share the material
-    /// (food/egg, food/cheese, charcoalpile, coalpile, saltpeter). RequiredMiningTier == 0
-    /// remains a separate guard alongside the prefix match (defense in depth). Mirrors
-    /// GoblinRockClimbCodePrefixes's shape exactly -- config-driven so a modded diggable-earth
-    /// block can be added without a code change. The "-layered" variant files resolve to codes
-    /// sharing their base family's prefix (e.g. bonysoil-1..bonysoil-7, sand-{rock}-{layer}),
-    /// so they need no separate entry. Canonical family/bucket table for this list, and the
-    /// other two goblin-dig consumers (dig-bonus attachment list, spit-packing conversion
-    /// targets), lives in notes/goblin-dig-materials-handover.md.</summary>
-    public string[] GoblinDiggableEarthCodePrefixes { get; set; } = new[]
-    {
-        "soil-", "packeddirt", "drypackeddirt", "bonysoil", "cob-", "forestfloor-",
-        "muddygravel", "sludgygravel", "sand-", "sandwavy-", "gravel-", "dirtygravel-",
-        "spitpackedsand-", "spitpackedgravel-", "spitpackedsoil-", "spitpackedsandwavy-",
-        "spitpackeddirtygravel-"
-    };
-
     // ── Goblin spit-packed earth (Phase G2) ──
+
+    // NOTE (G2.1): GoblinDiggableEarthCodePrefixes was removed here. It was a third,
+    // hand-maintained Code.Path prefix list duplicating what
+    // GoblinSpitPackingPatch.ResolveConversionTarget already knows -- and it drifted (5 of
+    // 10 spit-packed families were missing from it, so goblins got no tunnel walkspeed
+    // bonus tunneling under those ceilings). RFGoblinTunnelBehavior now calls
+    // GoblinSpitPackingPatch.IsGoblinEarth directly instead of consulting a config array.
+    // See notes/goblin-dig-materials-handover.md for the drift history.
 
     /// <summary>Master toggle for the spit-packed earth conversion (GoblinSpitPackingPatch).
     /// Ships ungated by any gut-primer/rot state -- primer-gating is G3 scope. Soil converts
