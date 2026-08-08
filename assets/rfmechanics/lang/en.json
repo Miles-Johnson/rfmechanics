@@ -1,0 +1,19 @@
+// Display names for the 10 spitpacked{family} blocktypes (G2/G2.1) -- these have never
+// had lang entries before, so they rendered as their raw untranslated lookup key
+// ("rfmechanics:block-spitpackedsand-peridotite") in tooltips/handbook/barrel-recipe UI.
+// Uses vanilla's own "block-{code}-*" trailing-wildcard convention (confirmed from
+// assets/game/lang/en.json: "block-bonysoil-*"/"block-forestfloor-*" cover their whole
+// variant set with one key each) for the 5 families that vary by rock/fertility/moisture,
+// rather than one entry per variant -- consolidated on purpose, not partial coverage.
+{
+  "block-spitpackedsand-*": "Spit-packed Sand",
+  "block-spitpackedsandwavy-*": "Spit-packed Sand (Wavy)",
+  "block-spitpackedgravel-*": "Spit-packed Gravel",
+  "block-spitpackeddirtygravel-*": "Spit-packed Dirty Gravel",
+  "block-spitpackedsoil-*": "Spit-packed Soil",
+  "block-spitpackedbonysoil": "Spit-packed Bony Soil",
+  "block-spitpackedcob": "Spit-packed Cob",
+  "block-spitpackedforestfloor": "Spit-packed Forest Floor",
+  "block-spitpackedmuddygravel": "Spit-packed Muddy Gravel",
+  "block-spitpackedsludgygravel": "Spit-packed Sludgy Gravel"
+}
