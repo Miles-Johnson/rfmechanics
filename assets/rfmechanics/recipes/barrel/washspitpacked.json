@@ -1,0 +1,82 @@
+[
+	{
+		code: "washspitpackedsand",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedsand-*", name: "rock", quantity: 4 }
+		],
+		output: { type: "block", code: "game:sand-{rock}", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedsandwavy",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedsandwavy-*", name: "rock", quantity: 4 }
+		],
+		output: { type: "block", code: "game:sandwavy-{rock}", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedgravel",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedgravel-*", name: "rock", quantity: 4 }
+		],
+		output: { type: "block", code: "game:gravel-{rock}", stackSize: 3 }
+	},
+	{
+		code: "washspitpackeddirtygravel",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackeddirtygravel-*", name: "variant", quantity: 4 }
+		],
+		output: { type: "block", code: "game:dirtygravel-{variant}", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedsoil",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedsoil-*", name: "fertility", quantity: 4 }
+		],
+		output: { type: "block", code: "game:soil-{fertility}-none", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedbonysoil",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedbonysoil", quantity: 4 }
+		],
+		output: { type: "block", code: "game:bonysoil", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedcob",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedcob", quantity: 4 }
+		],
+		output: { type: "block", code: "game:cob-none", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedforestfloor",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedforestfloor", quantity: 4 }
+		],
+		output: { type: "block", code: "game:soil-low-none", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedmuddygravel",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedmuddygravel", quantity: 4 }
+		],
+		output: { type: "block", code: "game:muddygravel", stackSize: 3 }
+	},
+	{
+		code: "washspitpackedsludgygravel",
+		ingredients: [
+			{ type: "item", code: "game:waterportion", litres: 2, consumeLitres: 2 },
+			{ type: "block", code: "spitpackedsludgygravel", quantity: 4 }
+		],
+		output: { type: "block", code: "game:sludgygravel", stackSize: 3 }
+	}
+]
