@@ -1,6 +1,8 @@
 {
 	code: "spitpackedsand",
-	behaviors: [{ name: "GoblinDigModifier" }],
+	// behaviors: [{ name: "GoblinDigModifier" }],  -- stripped: GoblinDigModifier's registration is
+	// currently disabled (re-homed to BugRace/, Phase G3). Restore this line verbatim if that class
+	// is ever re-registered. See mods/rfmechanics/src/BugRace/GoblinDigModifierBehavior.cs.
 	variantgroups: [
 		{ loadFromProperties: "block/rock", code: "rock" },
 	],

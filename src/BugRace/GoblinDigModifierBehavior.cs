@@ -3,9 +3,16 @@ using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
-namespace rfmechanics
+namespace rfmechanics.BugRace
 {
     /// <summary>
+    /// RE-HOMED, NOT DELETED (Phase G3 goblin extraction). This mechanic no longer runs for
+    /// goblins -- it's earmarked for the future bug race. Registration is disabled below (the
+    /// RegisterBlockBehaviorClass call in RFMechanicsModSystem.Start() is commented out). The
+    /// logic itself is untouched and ready to be reactivated, or lifted wholesale into the
+    /// bug-race mod, later. See notes/race-mechanics/ for the G3 rot-aura work this extraction
+    /// made room for.
+    ///
     /// BlockBehavior on the vanilla GetMiningSpeedModifier extension point (Block.cs:1010) --
     /// Block.OnGettingBroken multiplies dt by every attached behavior's modifier inside the
     /// RequiredMiningTier==0 branch BEFORE checking whether a tool is held, and vanilla's own

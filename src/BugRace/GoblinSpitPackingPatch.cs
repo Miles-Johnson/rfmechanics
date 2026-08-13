@@ -4,9 +4,18 @@ using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
-namespace rfmechanics
+namespace rfmechanics.BugRace
 {
     /// <summary>
+    /// RE-HOMED, NOT DELETED (Phase G3 goblin extraction). This mechanic no longer runs for
+    /// goblins -- it's earmarked for the future bug race. Registration is disabled below
+    /// (the [HarmonyPatch]/[HarmonyPostfix] attributes are commented out, which is the direct
+    /// equivalent of commenting out a RegisterBlockBehaviorClass line -- Harmony's PatchAll
+    /// discovers this class purely via those attributes, there is no separate registration
+    /// call). The logic itself is untouched and ready to be reactivated, or lifted wholesale
+    /// into the bug-race mod, later. See notes/race-mechanics/ for the G3 rot-aura work this
+    /// extraction made room for.
+    ///
     /// Harmony postfix on Block.OnBlockBroken. When a goblin breaks a block, converts every
     /// face-adjacent Soil/Sand/Gravel neighbor to its spit-packed variant (packeddirt for
     /// Soil; the new spitpackedsand-{rock}/spitpackedgravel-{rock} blocktypes for Sand/
@@ -40,12 +49,12 @@ namespace rfmechanics
     /// Ships ungated by any primer/rot state (G3 wires that in later) -- goblin trait check
     /// only, EnableGoblinSpitPacking master toggle.
     /// </summary>
-    [HarmonyPatch(typeof(Block), nameof(Block.OnBlockBroken))]
+    // [HarmonyPatch(typeof(Block), nameof(Block.OnBlockBroken))]   // DISABLED -- see banner comment above
     public static class GoblinSpitPackingPatch
     {
         private static bool loggedException = false;
 
-        [HarmonyPostfix]
+        // [HarmonyPostfix]   // DISABLED -- see banner comment above
         public static void Postfix(IWorldAccessor world, BlockPos pos, IPlayer byPlayer)
         {
             // ── Guard 1: null player (outside try, mirrors RestedBlockBreakPatch) ──
