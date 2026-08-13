@@ -37,11 +37,15 @@ namespace rfmechanics
             api.RegisterEntityBehaviorClass("rfthew", typeof(ThewBehavior));
             api.RegisterEntityBehaviorClass("rfband", typeof(BandBehavior));
             api.RegisterEntityBehaviorClass("rfburn", typeof(BurnBehavior));
+            api.RegisterEntityBehaviorClass("rffrenzy", typeof(FrenzyBehavior));
             api.RegisterEntityBehaviorClass("rfgoblintunnel", typeof(RFGoblinTunnelBehavior));
+            api.RegisterEntityBehaviorClass("rfgoblinrotaura", typeof(GoblinRotAuraBehavior));
+            api.RegisterCropBehavior("RfGoblinCropStunt", typeof(GoblinCropStuntBehavior));
+            api.RegisterBlockBehaviorClass("RfGoblinSpitRepair", typeof(RfGoblinSpitRepairBehavior));
 
-            // Phase G2: goblin bare-hand dig bonus, vanilla's own GetMiningSpeedModifier
-            // extension point (see GoblinDigModifierBehavior's doc comment).
-            api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(GoblinDigModifierBehavior));
+            // Phase G3: GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race),
+            // no longer registered for goblins -- see its banner comment for the full story.
+            // api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(rfmechanics.BugRace.GoblinDigModifierBehavior));
 
             // Apply Harmony patches
             harmony = new Harmony(HarmonyId);
@@ -148,6 +152,102 @@ namespace rfmechanics
             RegisterStatsFixCommand(api);
             RegisterPhase0Commands(api);
             RegisterThewCommand(api);
+            RegisterRotAuraDiagCommand(api);
+            RegisterRotAuraDebugCommand(api);
+        }
+
+        /// <summary>
+        /// Phase G3 rot aura diagnostics: raw dietsetup rot-intake, elapsed hours since last
+        /// dietsetup write, the live decayed value, and the resulting radius/intensity --
+        /// enough to confirm the intake-&gt;shape mapping (Task 4) behaves as designed without
+        /// eating rotten food and waiting to see the aura visibly change. Server-side only, same
+        /// reasoning as /rfdiag/dwarfdepth/rfthew: reads entity.WatchedAttributes directly
+        /// against the real entity.
+        /// </summary>
+        private void RegisterRotAuraDiagCommand(ICoreServerAPI api)
+        {
+            api.ChatCommands.Create("rfrotdiag")
+                .WithDescription("Dump goblin rot aura diagnostics (rot-intake, decay, resulting radius/intensity) for the calling player")
+                .RequiresPrivilege(Privilege.chat)
+                .HandleWith(args =>
+                {
+                    IPlayer player = args.Caller.Player;
+                    if (player == null)
+                        return TextCommandResult.Success("No player context.");
+
+                    var cfg = Config;
+                    if (cfg == null)
+                        return TextCommandResult.Success("Config not loaded.");
+
+                    Entity entity = player.Entity;
+                    var wa = entity.WatchedAttributes;
+                    double nowHours = entity.World.Calendar.TotalHours;
+                    double lastHours = wa.GetDouble("dietsetup:rotIntakeUpdatedHours", nowHours);
+                    double raw = wa.GetDouble("dietsetup:rotIntake", 0.0);
+                    double elapsedHours = Math.Max(0.0, nowHours - lastHours);
+
+                    float t = GoblinRotAuraBehavior.ReadLiveRotIntake(entity, cfg);
+                    (int radius, float intensity) = GoblinRotAuraBehavior.ComputeShape(cfg, GameMath.Clamp(t, 0f, 1f));
+
+                    string msg = string.Format(
+                        "rawRotIntake={0:F4} elapsedHoursSinceWrite={1:F2} liveDecayedIntake={2:F4} -> radius={3} intensity={4:F4} (RadiusMin={5} RadiusMax={6} halfLifeHours={7:F1})",
+                        raw, elapsedHours, t, radius, intensity, cfg.GoblinRotAuraRadiusMin, cfg.GoblinRotAuraRadiusMax, cfg.GoblinRotAuraIntakeHalfLifeHours);
+
+                    return TextCommandResult.Success(msg);
+                });
+        }
+
+        /// <summary>
+        /// Testing tools for the rot aura, root-privileged like /rfphase0/rfthew's own
+        /// force-set subcommands. Neither subcommand touches rot-aura game logic itself --
+        /// "registry" just reads GoblinRotAuraRegistry's live state, "timescale" is a thin
+        /// wrapper over vanilla's own IGameCalendar.CalendarSpeedMul (default 0.5, i.e. ~48
+        /// real minutes/in-game day) -- both Task 3 (crop growth, gated on
+        /// BlockEntityFarmland's own world.Calendar.TotalHours-driven interval) and Task 4
+        /// (rot-intake decay, also TotalHours-driven) are otherwise real-time-slow to observe.
+        /// Task 2 (spoilage acceleration) is NOT calendar-gated -- GoblinRotAuraBaseDeltaHoursPerSweep
+        /// is injected on the real-seconds sweep throttle regardless of calendar speed, so it
+        /// doesn't need this dial to test quickly.
+        /// </summary>
+        private void RegisterRotAuraDebugCommand(ICoreServerAPI api)
+        {
+            CommandArgumentParsers parsers = api.ChatCommands.Parsers;
+
+            api.ChatCommands.Create("rfrotaura")
+                .WithDescription("Rot aura testing tools: live registry dump, and a calendar-speed dial so crop-growth/rot-intake-decay tests don't need real-time waiting.")
+                .RequiresPrivilege(Privilege.root)
+                .BeginSubCommand("registry")
+                    .WithDescription("Dump every currently registered AuraSource (entityId, position, radius/intensity, age).")
+                    .HandleWith(args =>
+                    {
+                        if (GoblinRotAuraRegistry.AllSources.Count == 0)
+                            return TextCommandResult.Success("No active AuraSource entries.");
+
+                        long nowMs = api.World.ElapsedMilliseconds;
+                        var lines = new System.Collections.Generic.List<string>();
+                        foreach (var kv in GoblinRotAuraRegistry.AllSources)
+                        {
+                            AuraSource src = kv.Value;
+                            lines.Add(string.Format(
+                                "entityId={0} pos=({1},{2},{3}) radius={4} vExtent={5} intensity={6:F4} ageMs={7}",
+                                kv.Key, src.Pos.X, src.Pos.Y, src.Pos.Z, src.Radius, src.VerticalHalfExtent, src.Intensity, nowMs - src.UpdatedMs));
+                        }
+                        return TextCommandResult.Success(string.Join("\n", lines));
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("timescale")
+                    .WithDescription("Get/set world.Calendar.CalendarSpeedMul (vanilla, default 0.5). Higher = faster in-game days = faster crop-growth-check and rot-intake-decay testing. Remember to set it back afterward -- this affects the whole server, not just testing.")
+                    .WithArgs(parsers.OptionalFloat("mul"))
+                    .HandleWith(args =>
+                    {
+                        if (args.Parsers[0].IsMissing)
+                            return TextCommandResult.Success(string.Format("CalendarSpeedMul={0:F2} (vanilla default 0.5)", api.World.Calendar.CalendarSpeedMul));
+
+                        float mul = (float)args[0];
+                        api.World.Calendar.CalendarSpeedMul = mul;
+                        return TextCommandResult.Success(string.Format("CalendarSpeedMul set to {0:F2}. Remember to set it back to 0.5 (vanilla default) when done testing.", mul));
+                    })
+                .EndSubCommand();
         }
 
         public override void StartClientSide(ICoreClientAPI api)
@@ -349,14 +449,20 @@ namespace rfmechanics
 
                         float satFrac = hunger.Saturation / hunger.MaxSaturation;
                         float rampMult = ThewBehavior.RampMultiplier(satFrac, cfg);
-                        bool proteinGated = hunger.ProteinLevel > (float)cfg.ProteinGateLevel;
-                        bool gaining = isOrc && proteinGated && rampMult > 0f;
-                        bool decaying = isOrc && !gaining && satFrac < (float)cfg.ThewRampFloor;
-                        string decayTier = decaying ? ThewBehavior.DecayTierName(hunger, satFrac, cfg) : "(none)";
+                        bool proteinGated = ThewBehavior.IsProteinGated(hunger, cfg);
 
-                        long lastBiteMs = entity.Attributes.GetLong("rf-orc-thew-lastbite-ms", 0);
-                        long msSinceLastBite = entity.World.ElapsedMilliseconds - lastBiteMs;
-                        double biteCooldownRemaining = lastBiteMs == 0 ? 0 : Math.Max(0.0, cfg.BiteCooldownSec - msSinceLastBite / 1000.0);
+                        EnumFoodCategory lastFoodCat = (EnumFoodCategory)entity.Attributes.GetInt(ThewBehavior.LastFoodCategoryKey, (int)EnumFoodCategory.NoNutrition);
+                        bool foodTypeBlocksGain = cfg.EnableThewFoodTypeGate && ThewBehavior.IsNonProteinPlantCategory(lastFoodCat);
+
+                        bool gaining = isOrc && proteinGated && rampMult > 0f && !foodTypeBlocksGain;
+                        string decayTier = "(none)";
+                        if (isOrc && !gaining)
+                        {
+                            decayTier = satFrac < (float)cfg.ThewRampFloor
+                                ? ThewBehavior.DecayTierName(hunger, satFrac, cfg)
+                                : "SatedNonProtein";
+                        }
+                        bool decaying = decayTier != "(none)";
 
                         string[] extraTraits = entity.WatchedAttributes.GetStringArray("extraTraits", null);
                         string extraTraitsStr = extraTraits == null ? "(null)" : string.Join(",", extraTraits);
@@ -390,13 +496,22 @@ namespace rfmechanics
                             float usableThew = Math.Max(0f, thew - (float)cfg.BurnThewFloor);
                             double barsRemaining = cfg.BurnThewPerHp > 0 ? usableThew / (cfg.BurnThewPerHp * BurnBehavior.ReferenceBarHp) : 0.0;
                             burnStr = string.Format(
-                                "burnActive={0} health={1} burnThreshold={2:F2} thewSpentThisBurn={3:F4} barsRemaining={4:F2}",
-                                burnBhv.Burning, healthStr, cfg.BurnHealthFraction, burnBhv.ThewSpentThisBurn, barsRemaining);
+                                "burnActive={0} health={1} activationGap={2:F2} maxHealPerSec={3:F2} curveExp={4:F1} thewPerHp={5:F3} thewSpentThisBurn={6:F4} barsRemaining={7:F2}",
+                                burnBhv.Burning, healthStr, cfg.BurnActivationHealthFracGap, cfg.BurnMaxHealPerSecond, cfg.BurnCurveExponent, cfg.BurnThewPerHp, burnBhv.ThewSpentThisBurn, barsRemaining);
+                        }
+
+                        string frenzyStr = "(no frenzy behavior)";
+                        var frenzyBhv = entity.GetBehavior<FrenzyBehavior>();
+                        if (frenzyBhv != null)
+                        {
+                            frenzyStr = string.Format(
+                                "frenzyActive={0} curveExp={1:F1} maxSpeedBonus={2:F2} maxDamageBonus={3:F2} maxThewPerSec={4:F3} thewSpentThisFrenzy={5:F4}",
+                                frenzyBhv.Frenzied, cfg.FrenzyCurveExponent, cfg.FrenzyMaxSpeedBonus, cfg.FrenzyMaxDamageBonus, cfg.FrenzyMaxThewPerSecond, frenzyBhv.ThewSpentThisFrenzy);
                         }
 
                         string msg = string.Format(
-                            "thew={0:F4} orc={1} charClass={2} extraTraits=[{3}] satFrac={4:F3} rampMult={5:F3} (floor {6:F2} ceiling {7:F2}) protein={8:F1} proteinGated={9} (threshold {10:F1}) gaining={11} decaying={12} decayTier={13} biteCooldownRemaining={14:F1}s shieldActive={15} {16} {17}",
-                            thew, isOrc, charClass ?? "(null)", extraTraitsStr, satFrac, rampMult, cfg.ThewRampFloor, cfg.ThewRampCeiling, hunger.ProteinLevel, proteinGated, cfg.ProteinGateLevel, gaining, decaying, decayTier, biteCooldownRemaining, cfg.StarvationShieldWhileThew && thew > 0f, bandStr, burnStr);
+                            "thew={0:F4} orc={1} charClass={2} extraTraits=[{3}] satFrac={4:F3} rampMult={5:F3} (floor {6:F2} ceiling {7:F2}) protein={8:F1} dairy={9:F1} proteinGated={10} (threshold {11:F1}, Protein OR Dairy) lastFoodCategory={12} foodTypeBlocksGain={13} gaining={14} decaying={15} decayTier={16} shieldActive={17} {18} {19} {20}",
+                            thew, isOrc, charClass ?? "(null)", extraTraitsStr, satFrac, rampMult, cfg.ThewRampFloor, cfg.ThewRampCeiling, hunger.ProteinLevel, hunger.DairyLevel, proteinGated, cfg.ProteinGateLevel, lastFoodCat, foodTypeBlocksGain, gaining, decaying, decayTier, cfg.StarvationShieldWhileThew && thew > 0f, bandStr, burnStr, frenzyStr);
 
                         return TextCommandResult.Success(msg);
                     })

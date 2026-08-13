@@ -161,6 +161,28 @@ public class RFMechanicsConfig
     /// on. 0.35 ~= one band's worth of Thew; clamped to 0 by Thew's own setter.</summary>
     public double ThewDeathPenalty { get; set; } = 0.35;
 
+    /// <summary>Phase 2 (T1): food-type gate on Thew gain. Whenever the last item an orc ate
+    /// (tracked by ThewEatPulsePatch's postfix, "rf-orc-last-food-category" on entity.Attributes)
+    /// resolved to EnumFoodCategory Fruit/Vegetable/Grain, BOTH the hourly tick gain
+    /// (ThewBehavior.OnGameTick) and the eat-pulse (ThewEatPulsePatch) are blocked regardless of
+    /// ProteinLevel/satFrac -- a residually-elevated ProteinLevel from an earlier meat meal can no
+    /// longer be "ridden" by topping off satiety on cheap grain/veg/fruit afterward. Protein and
+    /// Dairy categories are unaffected (pass through to the existing ProteinLevel gate
+    /// unchanged). Not independently toggleable -- this is a sub-condition of EnableThew, not a
+    /// separate feature.</summary>
+    public bool EnableThewFoodTypeGate { get; set; } = true;
+
+    /// <summary>Phase 2 (T2): decay rate applied when Thew's gain condition doesn't fire AND
+    /// satFrac is at/above ThewRampFloor -- i.e. the orc is well fed (or gorged on grain/veg/
+    /// fruit, see EnableThewFoodTypeGate) but not building Thew. Closes the dead zone the audit
+    /// found in the old if/else-if structure (notes/diagnostics/thew-audit.md Q4): previously
+    /// this state did nothing at all. Set gentler than ThewDecayUnderfedPerHour (0.05/h) because
+    /// this orc isn't starving, just eating the wrong things -- but deliberately nonzero so a
+    /// bread-only diet still erodes Bulky/Standard over hours, matching the "bread orcs should
+    /// shrink" design intent. TUNING: chosen, not locked -- flagged for review alongside the T0
+    /// Bulky break-even numbers (see thew-audit.md T0 / the Phase 2 report).</summary>
+    public double ThewDecaySatedNonProteinPerHour { get; set; } = 0.03;
+
     /// <summary>Base Thew gain per real-world elapsed hour at full ramp (sat &gt;= ThewRampCeiling)
     /// + protein-gated, before the per-band ThewGainBandMult multiplier and the ThewRampFloor..
     /// ThewRampCeiling ramp scaling itself. Locked default per the Phase 3 hunger-numbers pass
@@ -176,13 +198,19 @@ public class RFMechanicsConfig
     /// player's current band is Bulky, regardless of saturation/gorge/decay-tier state --
     /// stacks additively with whichever of the three decay tiers below is currently active (or
     /// with the gain ramp, if somehow both are true at once, though the tiers are structured so
-    /// they aren't). This is the lever that makes Bulky a war posture rather than a lifestyle:
-    /// fed net at Bulky is ThewGainPerHour*0.8 - this value = +0.03/h (still positive, deepening
-    /// slowly while fed), idle/unfed net is -0.05/h (negative -- Bulky always trends back toward
-    /// Standard without active provisioning). See notes/orc-phase3-partA-hunger-numbers.md
-    /// "RULING -- Option 2 locked" for the full derivation and the corrected net-rate
-    /// arithmetic.</summary>
-    public double BulkyHoldDecayPerHour { get; set; } = 0.05;
+    /// they aren't). This is the lever that makes Bulky a war posture rather than a lifestyle.
+    ///
+    /// T0 DECIDED (Phase 2 report, orc-phase2-as-built.md): lowered from 0.05 to 0.025 (midpoint
+    /// of the answered 0.02-0.03 range; ThewGainPerHour deliberately left untouched per the same
+    /// answer). At the coded-default ThewGainPerHour=0.10, this moves the Bulky sustain
+    /// break-even from 0.8125 to 0.65625 (rampMult = 0.025/(0.10*0.8) = 0.3125, satFrac =
+    /// 0.5+0.3125*0.5) -- a well-provisioned, non-fighting orc can now actually hold Bulky, per
+    /// the design intent T0 was blocked on. NOTE: this is an EXISTING config key -- per
+    /// thew-audit.md Q8 finding #3, a coded-default change alone does not update an
+    /// already-written live rfmechanics.json (only added/removed keys self-heal on restart); the
+    /// live value was hand-patched to 0.025 as part of this same deploy, see the as-built doc's
+    /// Deployment section.</summary>
+    public double BulkyHoldDecayPerHour { get; set; } = 0.025;
 
     /// <summary>Three-tier decay below ThewRampFloor -- supersedes the old flat
     /// ThewStarvationDecayPerHour/LowSaturationFraction pair, which left a neutral no-gain-no-
@@ -224,24 +252,51 @@ public class RFMechanicsConfig
     /// multiplier. Linear between ThewRampFloor and this value.</summary>
     public double ThewRampCeiling { get; set; } = 1.00;
 
-    /// <summary>Flat Thew granted per qualifying eat event ("bite"), on top of the per-hour tick
-    /// gain -- gated by BiteCooldownSec so it can't be farmed by rapid nibble-spam, and by the
-    /// same protein gate + ThewRampFloor saturation check as the tick gain. Small and mostly
-    /// symbolic: even perfect cadence (one pulse every BiteCooldownSec) adds roughly
-    /// ThewPerBite * 3600 / BiteCooldownSec per hour = 0.06/h at these defaults, well under the
-    /// difference the ramp itself makes between half-full and stuffed.</summary>
+    /// <summary>DORMANT (Phase 2 T6): superseded by ThewGainPerSaturationPoint -- a flat grant
+    /// per bite made nibbling small bites every BiteCooldownSec the dominant, farmable Thew
+    /// income path (up to 0.06/h at the live ThewGainPerHour=0.04, i.e. more than the base tick
+    /// rate itself -- see thew-audit.md Q2). No longer read anywhere. Left in place (not deleted)
+    /// so existing rfmechanics.json installs don't silently drop the key on the next
+    /// StoreModConfig rewrite.</summary>
     public double ThewPerBite { get; set; } = 0.001;
 
-    /// <summary>Minimum real-world seconds between eat-pulse grants, per player. Also incidentally
-    /// absorbs multi-ingredient meals, which fire EntityBehaviorHunger.OnEntityReceiveSaturation
-    /// once per ingredient (orc-diagnostic-findings.md §1) -- only the first ingredient within the
-    /// cooldown window grants a pulse.</summary>
+    /// <summary>DORMANT (Phase 2 T6): superseded -- proportional-to-saturation grants (see
+    /// ThewGainPerSaturationPoint) no longer need a farming-prevention cooldown, and a cooldown
+    /// actively works against the fix: a multi-ingredient meal fires
+    /// EntityBehaviorHunger.OnEntityReceiveSaturation once per ingredient
+    /// (orc-diagnostic-findings.md §1), and each ingredient's proportional share should count, not
+    /// just the first. No longer read anywhere. Left in place for the same install-compatibility
+    /// reason as ThewPerBite.</summary>
     public double BiteCooldownSec { get; set; } = 60.0;
 
-    /// <summary>ProteinLevel threshold above which the protein gain condition is met. Tuned against
-    /// the T5 baselines in notes/orc-phase0-results.md: one fresh cooked meat delivered +112
-    /// protein from a near-zero start, so 150 sits clearly above what a single meal gives --
-    /// reaching it requires sustained meat-eating, not one snack.</summary>
+    /// <summary>Phase 2 (T6): Thew granted per point of raw saturation on a qualifying eat event
+    /// ("bite"), replacing ThewPerBite's flat-per-event grant -- rewards eating well (one real
+    /// meal) over nibbling (many tiny bites), since total reward now tracks total saturation
+    /// eaten rather than event count. Applied to `saturation`, the pre-nutritionGainMultiplier
+    /// raw parameter of OnEntityReceiveSaturation (reference/decompiled/VSEssentials/
+    /// Vintagestory.GameContent/EntityBehaviorHunger.cs:239,245 -- confirmed NOT already scaled by
+    /// nutritionGainMultiplier, unlike the *Level fields).
+    /// RETUNED (post-deploy, same day as the T0/T1 update): lowered from 0.00015 to 0.0000133,
+    /// alongside ThewPerBiteCap dropping 0.05 -> 0.005 and ThewGainPerHour rising back to the
+    /// coded default 0.10 (live now matches). Together these push the eat-pulse toward "small,
+    /// bounded top-up" rather than a source that can rival the tick gain on its own -- still
+    /// TUNING, not locked, but this specific pairing was chosen and deployed live.</summary>
+    public double ThewGainPerSaturationPoint { get; set; } = 0.0000133;
+
+    /// <summary>Phase 2 (T6): ceiling on a single eat event's ThewGainPerSaturationPoint grant, so
+    /// one unusually high-saturation item can't produce an outsized single jump. RETUNED
+    /// alongside ThewGainPerSaturationPoint above -- see that field's doc comment.</summary>
+    public double ThewPerBiteCap { get; set; } = 0.005;
+
+    /// <summary>Threshold above which the protein gain condition is met -- checked against BOTH
+    /// ProteinLevel and DairyLevel (see ThewBehavior.IsProteinGated; widened post-report, since
+    /// cheese.json tags "Dairy" not "Protein" in vanilla assets, and a cheese-only diet was
+    /// silently failing to gain Thew under the original ProteinLevel-only check). Originally tuned
+    /// against ProteinLevel specifically: the T5 baselines in notes/orc-phase0-results.md found one
+    /// fresh cooked meat delivers +112 protein from a near-zero start, so 150 sits clearly above
+    /// what a single meal gives -- reaching it requires sustained meat-eating, not one snack.
+    /// Whether the same 150 threshold is well-calibrated for DairyLevel's own per-bite rate is
+    /// untested -- flagged for review.</summary>
     public double ProteinGateLevel { get; set; } = 150.0;
 
     /// <summary>Master toggle for the seasonal Thew gain multiplier. Off by default per settled design.</summary>
@@ -315,11 +370,14 @@ public class RFMechanicsConfig
     /// uniform across bands and simplify removal on race-swap-away).</summary>
     public double BulkyMeleeDamageBonus { get; set; } = 0.12;
 
-    /// <summary>Per-band delta applied to both "bluntDamageFactor" and "crushingDamageFactor" --
-    /// these are PlayerModelLib's own Harmony-patched Stats categories (StatsPatches.cs), not
-    /// vanilla-registered ones, confirmed already working in this codebase via the dwarf trait
-    /// (crushingDamageFactor -0.5, bluntDamageFactor -0.2 in traits.json). Negative = resistance.</summary>
-    public OrcBandTriple BluntCrushResistDelta { get; set; } = new OrcBandTriple { Lean = 0.0, Standard = -0.06, Bulky = -0.18 };
+    /// <summary>Per-band extra delta on the vanilla "rangedWeaponsAcc" blended stat (registered
+    /// EntityPlayer.cs, consumed BaseAimingAccuracy.Update in vsessentialsmod), stacked on top of
+    /// the race-wide "rangedWeaponsAcc": -0.25 baseline in raceframework's rf-orc-negative trait.
+    /// Only Bulky gets an extra penalty -- mass costs something specific on top of every orc's
+    /// baseline inaccuracy. Combined worst case (race -0.25 + band -0.15 = -0.40 off a base of
+    /// 1.0) stays well clear of the point where BaseAimingAccuracy's 1 - 0.075/rangedAcc formula
+    /// degrades as the blended value approaches 0.</summary>
+    public OrcBandTriple RangedAccDelta { get; set; } = new OrcBandTriple { Lean = 0.0, Standard = 0.0, Bulky = -0.15 };
 
     /// <summary>Bulky-only delta on "armorWalkSpeedAffectedness" (real vanilla-registered stat,
     /// EntityPlayer.cs:404; already used by dwarf -0.85 / elf-negative +0.8 in traits.json).
@@ -351,29 +409,108 @@ public class RFMechanicsConfig
     /// to burn, but this lets burn be disabled while Thew/Bands keep running.</summary>
     public bool EnableBurn { get; set; } = true;
 
-    /// <summary>Health fraction (of current MaxHealth) below which burn mode triggers, for as
-    /// long as Thew remains above BurnThewFloor. Thew-gated, not band-gated: any band burns if
-    /// Thew remains -- supersedes an earlier "nothing to burn at Lean" framing. At the floor, no
-    /// net heal; vanilla death rules apply untouched.</summary>
+    /// <summary>DEPRECATED as an activation gate (Phase 2 T3): the locked cubic burn model has no
+    /// activation threshold -- heal/s = BurnMaxHealPerSecond * (1-healthFrac)^BurnCurveExponent is
+    /// notionally active at any health below 100%, near-zero close to full health, escalating as
+    /// health drops. No longer read by BurnBehavior's trigger check (see
+    /// BurnActivationHealthFracGap for the new, purely-performance gate). Left in place so
+    /// existing rfmechanics.json installs don't silently drop the key, and still shown in
+    /// /rfthew dump for reference.</summary>
     public double BurnHealthFraction { get; set; } = 0.25;
 
-    /// <summary>HP healed per real second while burning.</summary>
+    /// <summary>DORMANT (Phase 2 T3): superseded by BurnMaxHealPerSecond/BurnCurveExponent's
+    /// cubic curve -- the old flat-rate model healed this many hp/s unconditionally whenever burn
+    /// was active, regardless of how far below the (now-removed) BurnHealthFraction threshold
+    /// health was. No longer read anywhere. Left in place for install compatibility.</summary>
     public double BurnHealPerSecond { get; set; } = 0.75;
 
-    /// <summary>Thew cost per HP healed while burning. A full vanilla 15-hp bar costs
-    /// BurnThewPerHp * 15 =~ 0.18 Thew at the default -- a war-built 1.0 orc carries roughly 4-5
-    /// emergency bars, a fresh 0.70 Bulky ~3, a 0.2 Lean one thin partial heal.</summary>
-    public double BurnThewPerHp { get; set; } = 0.012;
+    /// <summary>Phase 2 (T3) locked design value: peak heal rate (hp/s) the cubic curve approaches
+    /// as healthFrac -&gt; 0 -- heal/s = BurnMaxHealPerSecond * (1-healthFrac)^BurnCurveExponent.
+    /// Given directly by the Phase 2 brief (orc-phase4-burn-to-survive-design.md), not derived.</summary>
+    public double BurnMaxHealPerSecond { get; set; } = 1.5;
+
+    /// <summary>Phase 2 (T3) locked design value: exponent on the cubic burn curve. Given directly
+    /// by the brief. Also the default for FrenzyCurveExponent (same shape family, see T4), though
+    /// the two are independently configurable.</summary>
+    public double BurnCurveExponent { get; set; } = 3.0;
+
+    /// <summary>Phase 2 (T3) locked design value, changed from 0.012: Thew cost per HP healed
+    /// while burning. A full vanilla 15-hp bar now costs BurnThewPerHp * 15 =~ 0.45 Thew -- burn
+    /// is markedly more expensive than the old flat model, consistent with the cubic curve's peak
+    /// rate (1.5 hp/s vs the old flat 0.75 hp/s) also being roughly double. Live value was pushed
+    /// to match this default (post-deploy, same day as the T0/T1 update) -- no longer drifted.</summary>
+    public double BurnThewPerHp { get; set; } = 0.03;
 
     /// <summary>Thew floor burn cannot cross. Below this remaining Thew, burn will not
     /// trigger/continue; vanilla death rules apply untouched from that point.</summary>
     public double BurnThewFloor { get; set; } = 0.02;
+
+    /// <summary>Phase 2 (T3): purely a performance gate, NOT a game-design threshold (that's what
+    /// BurnHealthFraction used to be, before the cubic rewrite removed it). The cubic curve is
+    /// notionally active at any healthFrac &lt; 1, but the effect is imperceptible extremely close to
+    /// full health (e.g. at healthFrac=0.99, (1-healthFrac)^3 = 1e-6) -- registering a 500ms fast-
+    /// tick listener for that is pure waste. Burn's fast tick is entered/stopped when
+    /// (1-healthFrac) crosses this gap, not when it crosses a design-relevant threshold. Small by
+    /// design -- large enough to skip true noise, small enough that no player-visible healing is
+    /// ever skipped.</summary>
+    public double BurnActivationHealthFracGap { get; set; } = 0.02;
 
     /// <summary>Interval, in milliseconds, of the fast game-tick listener registered only while
     /// burn conditions hold (entered/exited on the shared 6s slow tick and immediately on
     /// damage received). Too coarse a listener would make burn feel laggy in combat; this is
     /// deliberately much faster than the 6s Thew/Band cadence, but only runs while burning.</summary>
     public int BurnFastTickMs { get; set; } = 500;
+
+    // ── Frenzy (Orc, Phase 2 T4) ──
+
+    /// <summary>Master toggle for Frenzy. Independent of EnableBurn -- both key off the same
+    /// health-fraction trigger and spend from the same Thew pool (see FrenzyCurveExponent's doc
+    /// comment for the composition rationale) but are separately disableable.</summary>
+    public bool EnableFrenzy { get; set; } = true;
+
+    /// <summary>Exponent on the Frenzy curve -- same shape family as Burn (T3), same threshold-
+    /// free trigger (health &lt; 100%, gated for performance only by
+    /// BurnActivationHealthFracGap/FrenzyThewFloor, not a game-design cutoff): speed/damage bonus
+    /// and Thew cost per second all scale as (1-healthFrac)^FrenzyCurveExponent. Defaults to the
+    /// same value as BurnCurveExponent but is independently tunable.</summary>
+    public double FrenzyCurveExponent { get; set; } = 3.0;
+
+    /// <summary>Walkspeed delta (Stats.Set-delta units, matching WalkSpeedDelta's convention) at
+    /// the curve's peak (healthFrac -&gt; 0), scaled by (1-healthFrac)^FrenzyCurveExponent at every
+    /// point below. TUNING: new mechanic, no locked number -- chosen, flagged for review.</summary>
+    public double FrenzyMaxSpeedBonus { get; set; } = 0.25;
+
+    /// <summary>Melee damage delta (Stats.Set-delta units, matching BulkyMeleeDamageBonus's
+    /// convention) at the curve's peak, same scaling as FrenzyMaxSpeedBonus. TUNING: new
+    /// mechanic, no locked number -- chosen, flagged for review.</summary>
+    public double FrenzyMaxDamageBonus { get; set; } = 0.35;
+
+    /// <summary>Thew spend rate (per second) at the curve's peak, same scaling as
+    /// FrenzyMaxSpeedBonus/FrenzyMaxDamageBonus. At a genuinely dangerous healthFrac=0.2 this
+    /// works out to ~0.015 Thew/s (0.03 * 0.8^3) -- roughly a third of a band's worth of Thew
+    /// (~0.30-0.40) per 20-25s of sustained near-death combat. Combined with Burn's own worst-case
+    /// spend (BurnMaxHealPerSecond * BurnThewPerHp = 0.045 Thew/s), a prolonged fight at critical
+    /// health can burn through Thew fast -- intentional, per the brief's "the correct response to
+    /// a bloodied orc is to leave." TUNING: new mechanic, no locked number -- chosen, flagged for
+    /// review.</summary>
+    public double FrenzyMaxThewPerSecond { get; set; } = 0.03;
+
+    /// <summary>Thew floor Frenzy cannot cross, mirroring BurnThewFloor by default but
+    /// independently configurable (Burn and Frenzy read/write the same Thew pool with no
+    /// reservation between them, same no-coordination precedent as any two Thew spenders -- see
+    /// thew-audit.md Q7 -- so each needs its own floor check).</summary>
+    public double FrenzyThewFloor { get; set; } = 0.02;
+
+    /// <summary>Interval, in milliseconds, of Frenzy's own fast game-tick listener. Mirrors
+    /// BurnFastTickMs by default, independently tunable.</summary>
+    public int FrenzyFastTickMs { get; set; } = 500;
+
+    /// <summary>Minimum change in Frenzy's computed walkspeed/meleeWeaponsDamage stat values
+    /// before they're re-written via Stats.Set -- Frenzy recomputes every fast tick (the bonus
+    /// tracks current healthFrac continuously, not a value fixed at trigger time), so without a
+    /// write-avoidance threshold this would spam WatchedAttributes dirty/sync on every tick.
+    /// Mirrors RestedStatWriteThreshold's identical role and reasoning.</summary>
+    public double FrenzyStatWriteThreshold { get; set; } = 0.02;
 
     // ── Darkvision (Goblin) ──
 
@@ -405,11 +542,12 @@ public class RFMechanicsConfig
 
     // ── Goblin dig speed (Phase G2) ──
 
-    /// <summary>Master toggle for the Goblin bare-hand dig bonus on Soil/Sand/Gravel-tier
-    /// blocks (soil, sand, gravel, packeddirt, drypackeddirt, and the new spit-packed
-    /// variants). Applied via GoblinDigModifierBehavior, vanilla's own GetMiningSpeedModifier
-    /// extension point -- bare-hand only by construction, a held tool overwrites the result
-    /// (see notes/goblin-phase-g2-partA-report.md A1).</summary>
+    /// <summary>DORMANT (Phase G3): GoblinDigModifierBehavior is re-homed to src/BugRace/ and
+    /// no longer registered, so this flag currently has no effect. Left in place (not
+    /// deleted) so existing rfmechanics.json installs don't silently drop the key on the next
+    /// StoreModConfig rewrite. Was: master toggle for the Goblin bare-hand dig bonus on
+    /// Soil/Sand/Gravel-tier blocks (soil, sand, gravel, packeddirt, drypackeddirt, and the
+    /// spit-packed variants), via vanilla's own GetMiningSpeedModifier extension point.</summary>
     public bool EnableGoblinDigBonus { get; set; } = true;
 
     /// <summary>Goblin bare-hand dig rate on diggable earth (replaces the vanilla implicit
@@ -475,11 +613,154 @@ public class RFMechanicsConfig
     // GoblinSpitPackingPatch.IsGoblinEarth directly instead of consulting a config array.
     // See notes/goblin-dig-materials-handover.md for the drift history.
 
-    /// <summary>Master toggle for the spit-packed earth conversion (GoblinSpitPackingPatch).
-    /// Ships ungated by any gut-primer/rot state -- primer-gating is G3 scope. Soil converts
-    /// to vanilla's packeddirt; Sand/Gravel convert to the new spitpackedsand-{rock}/
-    /// spitpackedgravel-{rock} blocktypes shipped in this mod's own assets.</summary>
+    /// <summary>DORMANT (Phase G3): GoblinSpitPackingPatch is re-homed to src/BugRace/ and its
+    /// Harmony attributes are commented out, so this flag currently has no effect. Left in
+    /// place (not deleted) so existing rfmechanics.json installs don't silently drop the key
+    /// on the next StoreModConfig rewrite. Was: master toggle for the spit-packed earth
+    /// conversion. Soil converted to vanilla's packeddirt; Sand/Gravel converted to the
+    /// spitpackedsand-{rock}/spitpackedgravel-{rock} blocktypes shipped in this mod's own
+    /// assets.</summary>
     public bool EnableGoblinSpitPacking { get; set; } = true;
+
+    // ── Goblin rot aura (Phase G3) ──
+
+    /// <summary>Master toggle for the rot aura (spoilage acceleration, larder hold, and crop
+    /// stunting -- Tasks 1-3 of the Phase G3 rebuild that replaced spit-packed earth).</summary>
+    public bool EnableGoblinRotAura { get; set; } = true;
+
+    /// <summary>Master toggle for sweeping nearby players' carried inventory (hotbar and worn
+    /// backpack contents), independent of EnableGoblinRotAura's own placed-container sweep so
+    /// carried-inventory sweeping can be disabled without disabling the container sweep.</summary>
+    public bool EnableGoblinRotAuraCarriedInventory { get; set; } = true;
+
+    /// <summary>Throttle interval (seconds) for the aura sweep, same accum-field pattern as
+    /// every other rfmechanics behavior. Matches vanilla's own 1.5-3s precedent for comparable
+    /// radius scans (BlockVicinityCondition, EntityBehaviorBodyTemperature).</summary>
+    public double GoblinRotAuraTickInterval { get; set; } = 2.0;
+
+    /// <summary>Horizontal radius floor -- the max-intensity end of Task 4's intake-driven
+    /// range (rot-starved goblins: narrow and intense).</summary>
+    public int GoblinRotAuraRadiusMin { get; set; } = 4;
+
+    /// <summary>Horizontal radius ceiling -- the wide/rot-fed end of Task 4's range, and the
+    /// approved sweep-cost cap (~6,700 positions/sweep at the matching VerticalHalfExtent).</summary>
+    public int GoblinRotAuraRadiusMax { get; set; } = 15;
+
+    /// <summary>Vertical clamp (+/-V) on the sweep, keeping it a flattened cylinder rather than
+    /// a full cube -- most of the horizontal reach without the Y-axis cost.</summary>
+    public int GoblinRotAuraVerticalHalfExtent { get; set; } = 3;
+
+    /// <summary>Intensity anchor at GoblinRotAuraRadiusMin (Task 4's narrow/intense end).
+    /// Intensity at other radii is derived, not independently configured -- see Task 4's
+    /// radius^2*intensity-constant mapping.</summary>
+    public double GoblinRotAuraIntensityAtMinRadius { get; set; } = 1.0;
+
+    /// <summary>DEPRECATED (Phase G3 rate-model fix): replaced by GoblinRotAuraRateMultiplier.
+    /// This was an absolute in-game-hours-per-sweep constant applied identically regardless of an
+    /// item's own transitionHours -- against vanilla's ~30 in-game-hours/real-hour default that
+    /// worked out to ~900 in-game-hours/real-hour (~30x too fast) and, because the delta was
+    /// absolute rather than proportional to each item's own transitionHours, a ~150x spread
+    /// between how many aura-multiples short- and long-lived foods effectively received. No
+    /// longer read anywhere -- left in place (not deleted, not renamed) purely so existing
+    /// rfmechanics.json installs with this key already written don't get a stale/misleading value
+    /// silently dropped on the next StoreModConfig rewrite. See GoblinRotAuraBehavior.
+    /// AccelerateSlots for the replacement.</summary>
+    public double GoblinRotAuraBaseDeltaHoursPerSweep { get; set; } = 0.5;
+
+    /// <summary>Phase G3 rate-model fix: the aura advances spoilage at this multiple of the item's
+    /// own normal (vanilla, unaided) rate -- e.g. 3.0 means a stack held in the aura reaches the
+    /// hold ceiling about 3x faster than it would sitting untouched. Derived live each sweep from
+    /// world.Calendar.SpeedOfTime * world.Calendar.CalendarSpeedMul (in-game-hours per real-hour,
+    /// ~30 at vanilla defaults) and GoblinRotAuraTickInterval, NOT a hardcoded 30 -- tracks
+    /// CalendarSpeedMul if a server changes it. The aura only ever adds (RateMultiplier - 1) worth
+    /// of extra calendar-hours per sweep, since vanilla's own passive aging already supplies the
+    /// first 1x for free (baked into TransitionedHours by UpdateAndGetTransitionState before the
+    /// aura's own delta is added) -- adding a full multiplier on top would make the effective total
+    /// (RateMultiplier + 1)x instead of RateMultiplier x. See GoblinRotAuraBehavior.AccelerateSlots
+    /// for the full derivation, including why this does not (and structurally cannot) vary by the
+    /// item's own transitionHours despite fixing the old spread bug.</summary>
+    public double GoblinRotAuraRateMultiplier { get; set; } = 3.0;
+
+    /// <summary>Ceiling on TransitionLevel the aura will ever push a stack to -- food degrades
+    /// toward "about to spoil" but the aura alone never fully destroys it (larder hold).
+    /// Maps linearly and exactly to the tooltip's displayed spoilage percentage (TransitionLevel
+    /// == HoldFraction at the hold ceiling) -- 0.85 displays as "85%".</summary>
+    public double GoblinRotAuraHoldFraction { get; set; } = 0.85;
+
+    /// <summary>Minimum ACCELERATION delta (hours) before a SetTransitionState+MarkDirty write
+    /// happens -- write-avoidance only, never gates the hold-ceiling write-back. Sized against
+    /// the worst case: at RadiusMax/min Intensity (RadiusMin^2/RadiusMax^2 = 16/225 = 0.071),
+    /// max achievable delta is BaseDeltaHoursPerSweep * 1.0 * 0.071 ~= 0.036 hours -- this must
+    /// stay comfortably below that or every wide/rot-fed goblin's acceleration silently zeroes
+    /// out.</summary>
+    public double GoblinRotAuraWriteThresholdHours { get; set; } = 0.01;
+
+    /// <summary>Phase G3 hold-creep fix: past the hold ceiling, food no longer parks there
+    /// forever -- the delta becomes the normal computed per-sweep delta multiplied by this
+    /// factor, so it keeps crawling (very slowly) toward fully spoiled instead of hard-clamping.
+    /// 0.05 = 5% of the normal accelerated-phase rate. See GoblinRotAuraBehavior.AccelerateSlots'
+    /// hold-creep block.</summary>
+    public double GoblinRotAuraHoldCreepFactor { get; set; } = 0.05;
+
+    /// <summary>Absolute floor (in-game hours) under GoblinRotAuraHoldCreepFactor's computed
+    /// delta. Without it, a low-intensity (rot-fed, wide-slow) goblin's creep delta shrinks
+    /// toward zero along with its intensity and effectively reproduces the old hard clamp --
+    /// this guarantees a minimum crawl regardless of intensity. 0.001h (~3.6 real seconds'
+    /// worth at vanilla calendar defaults) was picked to sit below the accelerated-phase delta
+    /// at typical intensities (so it doesn't distort GoblinRotAuraHoldCreepFactor's intended
+    /// scaling in the common case) while still bounding worst-case time-to-fully-spoiled to
+    /// roughly an hour or two rather than an effectively-unbounded asymptote.</summary>
+    public double GoblinRotAuraHoldCreepFloorHours { get; set; } = 0.001;
+
+    /// <summary>Minimum spatial-falloff strength (0..1, one block above the farmland,
+    /// independent of Intensity -- see GoblinRotAuraRegistry's doc comment) required to pause
+    /// that crop's growth check.</summary>
+    public double CropStuntMinStrength { get; set; } = 0.15;
+
+    /// <summary>Decay half-life (in-game calendar hours) used to decay dietsetup's rot-intake
+    /// accumulator live on read. MUST match dietsetup's own RotIntakeHalfLifeHours
+    /// (DietSetupConfig.cs) -- a documented cross-reference, not independently tunable, since
+    /// rfmechanics has no assembly reference to dietsetup to read the value directly.</summary>
+    public double GoblinRotAuraIntakeHalfLifeHours { get; set; } = 48.0;
+
+    /// <summary>Master toggle for letting goblins eat game:rot (grants it a minimal
+    /// FoodNutritionProperties via GoblinRotEdiblePatch; vanilla and every other player still
+    /// see it as inedible).</summary>
+    public bool EnableGoblinRotEdible { get; set; } = true;
+
+    /// <summary>Satiety granted when a goblin eats game:rot. Deliberately far below dietsetup's
+    /// raw-redmeat grant (30, see dietsetup grants.json) -- this is a survival-floor mechanic,
+    /// not a food source.</summary>
+    public float GoblinRotEdibleSatiety { get; set; } = 3.0f;
+
+    // ── Goblin spit charges (rot repair) ──
+
+    /// <summary>Master toggle for goblin spit charges (RfGoblinSpitChargeGrantPatch +
+    /// RfGoblinSpitRepairBehavior). A goblin's gut renders decay into a binding secretion --
+    /// eating game:rot grants charges, empty-hand interact on a reparable block spends one to
+    /// apply repair through the same repairState math vanilla glue uses.</summary>
+    public bool EnableGoblinSpitCharges { get; set; } = true;
+
+    /// <summary>Spit charges granted per qualifying game:rot eat (gated the same way
+    /// GoblinRotEdiblePatch gates edibility itself: goblin trait + secondsUsed &gt;= 0.95f
+    /// completion, see RfGoblinSpitChargeGrantPatch).</summary>
+    public int SpitChargesPerRot { get; set; } = 2;
+
+    /// <summary>Max spit charges a goblin can hold. Deliberately kept below the number of
+    /// applications needed to fully repair a reparability-6 block (8, at SpitRepairGain 0.125)
+    /// so a goblin cannot finish a repair without stopping to eat again -- see SpitRepairGain's
+    /// doc comment for the derivation and the known jonaslamp (reparability 4) exception.</summary>
+    public int SpitChargeCap { get; set; } = 6;
+
+    /// <summary>Repair applied per spit charge spent, fed into vanilla's own
+    /// BehaviorReparable.cs:151 formula (repairQuantity * 5 / (reparability - 1)) unchanged. At
+    /// reparability 6 (6 of the 7 target blocktypes) this reduces to x1.0, so 0.125 -&gt; 8
+    /// applications per block against a cap of 6 -- the intended gap. Known accepted exception:
+    /// jonaslamp (reparability 4) reduces to x1.667, so ~5 applications -- under the cap, so a
+    /// goblin can fully repair one in a single load. Lowering the global cap to close that gap
+    /// would cost the other six blocks room instead (6/8 -&gt; 4/8), a bigger regression than
+    /// accepting jonaslamp as an exception; a future per-reparability override could fix both.</summary>
+    public double SpitRepairGain { get; set; } = 0.125;
 
     // ── Elf leaf gathering (Phase G2) ──
 
