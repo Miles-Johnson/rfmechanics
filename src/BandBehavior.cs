@@ -1,6 +1,7 @@
 using System;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
+using Vintagestory.API.Datastructures;
 using Vintagestory.GameContent;
 
 namespace rfmechanics
@@ -39,6 +40,19 @@ namespace rfmechanics
         private float lerpToSize;
 
         public BandBehavior(Entity entity) : base(entity) { }
+
+        public override void Initialize(EntityProperties properties, JsonObject attributes)
+        {
+            base.Initialize(properties, attributes);
+
+            // One-time migration cleanup: bluntDamageFactor/crushingDamageFactor used to be
+            // written per-band under StatSource but are no longer applied. Initialize() runs
+            // once per behavior construction (every load and fresh spawn, before OnGameTick),
+            // so this clears any value stamped by the old code onto existing characters without
+            // a per-tick cost or a new persisted flag.
+            entity.Stats.Remove("bluntDamageFactor", StatSource);
+            entity.Stats.Remove("crushingDamageFactor", StatSource);
+        }
 
         public override string PropertyName() => "rfband";
 
@@ -142,10 +156,30 @@ namespace rfmechanics
             return Band.Lean;
         }
 
-        /// <summary>Single-step hysteresis: given Thew moves at most a few thousandths per 6s
-        /// tick (see the locked gain/decay rates), it cannot skip two band boundaries in one
-        /// tick, so evaluating only the current band's adjacent transitions is sufficient.</summary>
+        /// <summary>Phase 2 (T5): resolves to the correct band in one evaluation regardless of how
+        /// far Thew moved this tick. The old version only checked the current band's immediately
+        /// adjacent transition -- safe only while Thew moved a few thousandths per 6s tick (the
+        /// slow gain/decay/burn rates), but Frenzy (T4) can now spend Thew fast enough to cross
+        /// more than one band boundary within a single 6s sampling window (thew-audit.md Q7,
+        /// finding #1). Steps one adjacent-transition-check at a time, same single-step logic as
+        /// before, but loops until a tick produces no further transition -- at most 2 steps since
+        /// there are only 3 bands, so this is not unbounded.</summary>
         private static Band EvaluateBand(float thew, Band current, RFMechanicsConfig cfg)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                Band next = EvaluateAdjacent(thew, current, cfg);
+                if (next == current) return current;
+                current = next;
+            }
+            return current;
+        }
+
+        /// <summary>Single-step check: does the current band transition to an immediately
+        /// adjacent one, given `thew`? Returns `current` unchanged if not. Factored out of
+        /// EvaluateBand so the multi-step loop above can repeat it without duplicating the
+        /// per-band threshold logic.</summary>
+        private static Band EvaluateAdjacent(float thew, Band current, RFMechanicsConfig cfg)
         {
             switch (current)
             {
@@ -172,10 +206,9 @@ namespace rfmechanics
             entity.Stats.Set("walkspeed", StatSource, (float)Pick(cfg.WalkSpeedDelta, b));
             entity.Stats.Set("animalSeekingRange", StatSource, (float)Pick(cfg.AnimalSeekingRangeDelta, b));
             entity.Stats.Set("meleeWeaponsDamage", StatSource, b == Band.Bulky ? (float)cfg.BulkyMeleeDamageBonus : 0f);
-            entity.Stats.Set("bluntDamageFactor", StatSource, (float)Pick(cfg.BluntCrushResistDelta, b));
-            entity.Stats.Set("crushingDamageFactor", StatSource, (float)Pick(cfg.BluntCrushResistDelta, b));
             entity.Stats.Set("armorWalkSpeedAffectedness", StatSource, b == Band.Bulky ? (float)cfg.BulkyArmorWalkSpeedAffectednessDelta : 0f);
             entity.Stats.Set("maxhealthExtraPoints", StatSource, (float)Pick(cfg.MaxHpExtraPoints, b));
+            entity.Stats.Set("rangedWeaponsAcc", StatSource, (float)Pick(cfg.RangedAccDelta, b));
 
             // Stats.Set alone only marks WatchedAttributes dirty -- nothing re-triggers
             // EntityBehaviorHealth.UpdateMaxHealth() off a bare stats change (confirmed by
@@ -190,10 +223,9 @@ namespace rfmechanics
             entity.Stats.Remove("walkspeed", StatSource);
             entity.Stats.Remove("animalSeekingRange", StatSource);
             entity.Stats.Remove("meleeWeaponsDamage", StatSource);
-            entity.Stats.Remove("bluntDamageFactor", StatSource);
-            entity.Stats.Remove("crushingDamageFactor", StatSource);
             entity.Stats.Remove("armorWalkSpeedAffectedness", StatSource);
             entity.Stats.Remove("maxhealthExtraPoints", StatSource);
+            entity.Stats.Remove("rangedWeaponsAcc", StatSource);
 
             entity.GetBehavior<EntityBehaviorHealth>()?.UpdateMaxHealth();
         }

@@ -6,12 +6,16 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Phase 4: Burn-to-Survive. Below BurnHealthFraction of MaxHealth, an orc with Thew
-    /// remaining above BurnThewFloor burns Thew to heal rapidly -- the principal drain on the
-    /// buffer Bands (Phase 3) spent the whole system building. Thew-gated, not band-gated: any
-    /// band burns if Thew remains. Stacks with vanilla's own saturation-throttled regen
-    /// (untouched) and with the starvation shield (ThewShieldPatch) -- a starving orc below 25%
-    /// HP burns from both simultaneously, which is intended and will be fast.
+    /// Phase 4 (rewritten Phase 2 T3): Burn-to-Survive. An orc with Thew remaining above
+    /// BurnThewFloor burns Thew to heal, at a rate that follows a cubic curve with NO activation
+    /// threshold: heal/s = BurnMaxHealPerSecond * (1-healthFrac)^BurnCurveExponent. Near full
+    /// health the curve is imperceptibly small; it escalates as health drops, fastest right at
+    /// death's door. This supersedes the original flat/threshold model (heal only below
+    /// BurnHealthFraction, at a constant rate) -- see BurnHealthFraction/BurnHealPerSecond's own
+    /// doc comments for what changed and why. Thew-gated, not band-gated: any band burns if Thew
+    /// remains. Stacks with vanilla's own saturation-throttled regen (untouched) and with the
+    /// starvation shield (ThewShieldPatch) -- a starving orc near death burns from both
+    /// simultaneously, which is intended and will be fast.
     ///
     /// Kept as its own EntityBehavior (same rationale as BandBehavior's own separation from
     /// ThewBehavior, see BandBehavior's header) because it owns something neither of the other
@@ -19,9 +23,12 @@ namespace rfmechanics
     /// only while burn conditions hold. Entry/exit is evaluated on the shared 6s slow tick (same
     /// cadence as ThewBehavior/BandBehavior, by convention) and immediately on damage received,
     /// rather than gating a listener that runs unconditionally every tick like the other two
-    /// behaviors. The fast tick itself only ever touches Health and Thew -- never Stats, never
-    /// entitySize; Bands react to Thew dropping through their own hysteresis on their own tick
-    /// with no special-casing needed here (per the brief: if it doesn't, that's a Phase 3 bug).
+    /// behaviors -- the "no activation threshold" design property does NOT mean this listener
+    /// runs permanently for every orc regardless of health; see BurnActivationHealthFracGap's doc
+    /// comment for why a listener still needs a (purely performance-motivated) entry/exit gate.
+    /// The fast tick itself only ever touches Health and Thew -- never Stats, never entitySize;
+    /// Bands react to Thew dropping through their own hysteresis on their own tick with no
+    /// special-casing needed here (per the brief: if it doesn't, that's a Phase 3 bug).
     ///
     /// Same JSON-attach-to-every-player + internal IsOrc() gate pattern as ThewBehavior/
     /// BandBehavior/RestedBehavior -- attached via seraph-thew.json, appended after the vanilla
@@ -100,8 +107,11 @@ namespace rfmechanics
                 return;
             }
 
+            // T3: no game-design activation threshold anymore -- BurnActivationHealthFracGap is a
+            // performance-only cutoff (skips registering the fast tick when the cubic curve's
+            // effect would be imperceptible), not the old BurnHealthFraction design gate.
             float frac = healthBhv.Health / healthBhv.MaxHealth;
-            bool shouldBurn = frac < (float)cfg.BurnHealthFraction && thewBhv.Thew > (float)cfg.BurnThewFloor;
+            bool shouldBurn = (1f - frac) > (float)cfg.BurnActivationHealthFracGap && thewBhv.Thew > (float)cfg.BurnThewFloor;
 
             if (shouldBurn && !burning) StartBurn();
             else if (!shouldBurn && burning) StopBurn();
@@ -156,7 +166,13 @@ namespace rfmechanics
                 return;
             }
 
-            float hpWanted = (float)cfg.BurnHealPerSecond * deltaTime;
+            // T3: cubic curve, recomputed fresh every fast tick from the CURRENT healthFrac (not
+            // cached from StartBurn) -- heal/s = BurnMaxHealPerSecond * (1-healthFrac)^
+            // BurnCurveExponent, so the rate itself escalates smoothly as health continues to
+            // drop within the same burn session, not just at entry.
+            float healthFrac = healthBhv.Health / healthBhv.MaxHealth;
+            float curveMult = (float)Math.Pow(Math.Max(0.0, 1.0 - healthFrac), cfg.BurnCurveExponent);
+            float hpWanted = (float)cfg.BurnMaxHealPerSecond * curveMult * deltaTime;
             float thewPerHp = (float)cfg.BurnThewPerHp;
             float thewNeeded = hpWanted * thewPerHp;
 
@@ -178,8 +194,8 @@ namespace rfmechanics
             thewSpentThisBurn += thewToSpend;
             healthBhv.Health = Math.Min(healthBhv.Health + hpToApply, healthBhv.MaxHealth);
 
-            float frac = healthBhv.Health / healthBhv.MaxHealth;
-            if (frac >= (float)cfg.BurnHealthFraction || thewBhv.Thew <= (float)cfg.BurnThewFloor)
+            float newFrac = healthBhv.Health / healthBhv.MaxHealth;
+            if ((1f - newFrac) <= (float)cfg.BurnActivationHealthFracGap || thewBhv.Thew <= (float)cfg.BurnThewFloor)
             {
                 StopBurn();
             }

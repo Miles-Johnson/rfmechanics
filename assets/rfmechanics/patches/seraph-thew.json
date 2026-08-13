@@ -16,5 +16,11 @@
         "path": "/server/behaviors/-",
         "file": "game:entities/humanoid/player.json",
         "value": { "code": "rfburn" }
+    },
+    {
+        "op": "add",
+        "path": "/server/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rffrenzy" }
     }
 ]

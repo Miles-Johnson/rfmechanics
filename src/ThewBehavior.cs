@@ -28,6 +28,12 @@ namespace rfmechanics
         private const string AttributeKey = "rf-orc-thew";
         private const float TickInterval = 6.0f;
 
+        /// <summary>Phase 2 (T1): last EnumFoodCategory an orc ate, written unconditionally by
+        /// ThewEatPulsePatch on every qualifying eat event (regardless of whether that event's
+        /// own pulse-gate conditions pass), read here to gate the hourly tick gain. Public so
+        /// ThewEatPulsePatch can write it without duplicating the attribute key.</summary>
+        public const string LastFoodCategoryKey = "rf-orc-last-food-category";
+
         private float accum;
 
         public ThewBehavior(Entity entity) : base(entity) { }
@@ -61,21 +67,31 @@ namespace rfmechanics
 
             float satFrac = hunger.Saturation / hunger.MaxSaturation;
             float rampMult = RampMultiplier(satFrac, cfg);
-            bool proteinGated = hunger.ProteinLevel > (float)cfg.ProteinGateLevel;
+            bool proteinGated = IsProteinGated(hunger, cfg);
+            bool foodTypeBlocksGain = cfg.EnableThewFoodTypeGate && LastFoodBlocksGain();
 
             float hourFraction = TickInterval / 3600f;
             var band = entity.GetBehavior<BandBehavior>()?.CurrentBand ?? BandBehavior.Band.Lean;
 
-            if (proteinGated && rampMult > 0f)
+            if (proteinGated && rampMult > 0f && !foodTypeBlocksGain)
             {
                 float bandMult = (float)BandBehavior.Pick(cfg.ThewGainBandMult, band);
                 Thew += (float)cfg.ThewGainPerHour * bandMult * rampMult * hourFraction * GetSeasonalMultiplier(cfg);
             }
-            else if (satFrac < (float)cfg.ThewRampFloor)
+            else
             {
-                // Three-tier decay, no neutral parking zone below the ramp floor -- see
-                // RFMechanicsConfig.ThewDecayUnderfedPerHour's doc comment.
-                float decayPerHour = DecayTierPerHour(hunger, satFrac, cfg);
+                // T2: no neutral parking zone anywhere, above or below the ramp floor -- gain not
+                // firing always means decay firing, at one of two rate families. Below the floor,
+                // the existing three-tier Underfed/Hungry/Starving decay (see
+                // RFMechanicsConfig.ThewDecayUnderfedPerHour's doc comment). At/above the floor
+                // (well-fed but not protein-gated, or blocked by EnableThewFoodTypeGate), the new
+                // ThewDecaySatedNonProteinPerHour tier -- this also resolves the audit's knife-edge
+                // finding (satFrac == ThewRampFloor exactly used to fall through both branches;
+                // now it lands in this else and satFrac < floor is false, so it correctly takes
+                // the sated-tier rate).
+                float decayPerHour = satFrac < (float)cfg.ThewRampFloor
+                    ? DecayTierPerHour(hunger, satFrac, cfg)
+                    : (float)cfg.ThewDecaySatedNonProteinPerHour;
                 Thew -= decayPerHour * hourFraction;
             }
 
@@ -176,6 +192,43 @@ namespace rfmechanics
             if (charSys == null) return false;
 
             return charSys.HasTrait(iplayer, cfg.OrcTraitCode);
+        }
+
+        /// <summary>Phase 2 (T1): true for the three EnumFoodCategory values the design brief
+        /// names as contributing no Thew regardless of satiety -- Fruit, Vegetable, Grain.
+        /// Protein and Dairy (and Unknown/NoNutrition, e.g. never having eaten) are NOT blocked
+        /// here; they pass through to the existing protein gate (see IsProteinGated) unchanged.
+        /// Public static so ThewEatPulsePatch uses the exact same classification as the tick
+        /// gain.</summary>
+        public static bool IsNonProteinPlantCategory(EnumFoodCategory foodCat) =>
+            foodCat == EnumFoodCategory.Fruit || foodCat == EnumFoodCategory.Vegetable || foodCat == EnumFoodCategory.Grain;
+
+        /// <summary>Phase 2 fix (post-report review): widened from a single ProteinLevel check to
+        /// a category SET (Protein OR Dairy), matching IsNonProteinPlantCategory's own set-based
+        /// shape. EnumFoodCategory.Protein and .Dairy are genuinely different vanilla categories
+        /// -- cheese.json tags "Dairy", never "Protein" (confirmed against installed assets), so
+        /// gating gain purely on ProteinLevel silently excluded cheese-only sustenance even though
+        /// it's a real orc-plausible protein-adjacent diet. Eggs and insects do NOT need this
+        /// widening and were verified, not assumed: egg.json and insect.json both already tag
+        /// "Protein" in vanilla assets, so they already raised ProteinLevel and passed the
+        /// original single-category gate correctly. Reuses ProteinGateLevel as the threshold for
+        /// both levels rather than adding a second config number -- untested whether Dairy's
+        /// per-bite nutrition rate matches meat's closely enough for the same threshold to feel
+        /// right; flagged for review if cheese-heavy diets end up gating too early/late in
+        /// practice.</summary>
+        public static bool IsProteinGated(EntityBehaviorHunger hunger, RFMechanicsConfig cfg)
+        {
+            float threshold = (float)cfg.ProteinGateLevel;
+            return hunger.ProteinLevel > threshold || hunger.DairyLevel > threshold;
+        }
+
+        /// <summary>Reads the last-eaten food category recorded by ThewEatPulsePatch and
+        /// classifies it. Defaults to NoNutrition (never eaten, or not orc-tracked yet) which is
+        /// never a blocking category, so a fresh spawn isn't gated by a value it never wrote.</summary>
+        private bool LastFoodBlocksGain()
+        {
+            int raw = entity.Attributes.GetInt(LastFoodCategoryKey, (int)EnumFoodCategory.NoNutrition);
+            return IsNonProteinPlantCategory((EnumFoodCategory)raw);
         }
 
         /// <summary>Linear ramp: 0 at/below ThewRampFloor, 1 at/above ThewRampCeiling. Public
