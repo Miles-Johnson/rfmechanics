@@ -114,6 +114,29 @@ public class RFMechanicsConfig
     /// GoblinRotAuraTickInterval's 2.0s precedent.</summary>
     public double AttunementTickInterval { get; set; } = 2.0;
 
+    /// <summary>Block Code.Path prefixes (StartsWith match, not a general wildcard) that count
+    /// as "forest-natural ground" for GetAttunementContext's check 1 -- resolved once at world
+    /// load into a HashSet&lt;int&gt; by ElfAttunementBlockWhitelist, never re-scanned per call.
+    /// Domain is always "game" (vanilla) for the shipped defaults. Verified against the live
+    /// 1.21.5 install's actual assets (assets/survival/blocktypes), not guessed:
+    /// "forestfloor-" = forest soil (soil/forestfloor.json, the only forest-soil family that
+    /// exists); "mossycobblestone-"/"mossyrockpolished-"/"mossystonebricks-" = the only "moss"
+    /// family in 1.21.5 -- there is no standalone ground-moss block, only mossy stone;
+    /// "leaves-grown"/"leavesbranchy-grown" match every "-grown-"/"-grown1-".."-grown7-"
+    /// variant via the shared prefix (no trailing dash needed) while excluding "-placed-",
+    /// mirroring ElfLeafDropPatch's own natural-vs-placed distinction; "log-grown-"/
+    /// "log-placed-" = raw/fallen timber only -- deliberately excludes planks and the
+    /// carved/debarked/narrow/quad/section/withresin processed log shapes, matching the brief's
+    /// explicit "excluding planks" instruction ("all wood" here means unprocessed timber, not
+    /// every wood-material block). Plain soil, stone, and sand are deliberately absent.</summary>
+    public string[] AttunementForestBlockCodePrefixes { get; set; } = new[]
+    {
+        "forestfloor-",
+        "mossycobblestone-", "mossyrockpolished-", "mossystonebricks-",
+        "leaves-grown", "leavesbranchy-grown",
+        "log-grown-", "log-placed-"
+    };
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>

@@ -154,6 +154,12 @@ namespace rfmechanics
             RegisterThewCommand(api);
             RegisterRotAuraDiagCommand(api);
             RegisterRotAuraDebugCommand(api);
+
+            // Server-only: ElfAttunementBehavior's tick (and therefore the underfoot check)
+            // never runs client-side, so only the server needs the resolved whitelist. Mirrors
+            // DwarfOreSongModSystem's StartClientSide-time api.World.Blocks iteration, just on
+            // the opposite side.
+            if (config != null) ElfAttunementBlockWhitelist.Resolve(api, config);
         }
 
         /// <summary>
