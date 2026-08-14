@@ -53,6 +53,16 @@ namespace rfmechanics
         private bool liveInitialized;
         private float lastFlushedAttunement;
 
+        /// <summary>True live value (see the class doc comment) -- /rfattune (E1.6) reads this
+        /// rather than the flushed Attunement property so the dump reflects reality even
+        /// between flushes.</summary>
+        public float LiveAttunement => liveAttunement;
+
+        /// <summary>Snapshot of which thresholds (parallel to
+        /// RFMechanicsConfig.AttunementThresholds) are currently active. Empty until the first
+        /// qualifying tick has run.</summary>
+        public bool[] ActiveThresholdsSnapshot => activeThresholds ?? System.Array.Empty<bool>();
+
         /// <summary>Cached elf-race result, refreshed every slow tick (and therefore within one
         /// tick interval of any characterClass change -- there is no separate change listener,
         /// polling on the slow tick is the refresh mechanism). Nothing outside this behavior may

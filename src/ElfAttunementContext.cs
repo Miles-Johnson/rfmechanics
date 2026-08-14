@@ -35,6 +35,23 @@ namespace rfmechanics
         public override string ToString() => Kind == AttunementContextKind.Grove ? $"Grove(tier={GroveTier})" : Kind.ToString();
     }
 
+    /// <summary>Per-check breakdown for /rfattune (E1.6) -- see ElfAttunementContext.GetDiagnostics.</summary>
+    public readonly struct AttunementDiagnostics
+    {
+        public bool ForestNaturalGround { get; }
+        public bool ForestPresence { get; }
+        public int? GroveTier { get; }
+        public AttunementContext Context { get; }
+
+        public AttunementDiagnostics(bool forestNaturalGround, bool forestPresence, int? groveTier, AttunementContext context)
+        {
+            ForestNaturalGround = forestNaturalGround;
+            ForestPresence = forestPresence;
+            GroveTier = groveTier;
+            Context = context;
+        }
+    }
+
     /// <summary>
     /// E1.2's context predicate. Three checks, ascending cost, short-circuiting -- most callers
     /// (the tick) only ever need GetAttunementContext; GetDiagnostics (added E1.6) evaluates all
@@ -49,6 +66,25 @@ namespace rfmechanics
 
             int? groveTier = ResolveGroveMembership_StubPhase1b(entity);
             return groveTier.HasValue ? AttunementContext.Grove(groveTier.Value) : AttunementContext.WildForest;
+        }
+
+        /// <summary>
+        /// E1.6: non-short-circuiting sibling of GetAttunementContext -- evaluates all three
+        /// checks independently (even ones a real GetAttunementContext call wouldn't reach) so
+        /// /rfattune can report which check failed, not just the combined result. Debug-only;
+        /// GetAttunementContext itself stays short-circuiting for the tick's sake.
+        /// </summary>
+        public static AttunementDiagnostics GetDiagnostics(Entity entity)
+        {
+            bool ground = IsOnForestNaturalGround(entity);
+            bool presence = HasNearbyForestPresence_StubPhase1b(entity);
+            int? groveTier = ResolveGroveMembership_StubPhase1b(entity);
+
+            AttunementContext context = (!ground || !presence)
+                ? AttunementContext.None
+                : (groveTier.HasValue ? AttunementContext.Grove(groveTier.Value) : AttunementContext.WildForest);
+
+            return new AttunementDiagnostics(ground, presence, groveTier, context);
         }
 
         /// <summary>

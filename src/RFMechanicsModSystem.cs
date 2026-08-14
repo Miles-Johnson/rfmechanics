@@ -168,6 +168,56 @@ namespace rfmechanics
                 api.Logger.Notification("[rfmechanics] ElfAttunement threshold {0} {1} for entity {2} (value={3:F2})",
                     threshold, active ? "ENTERED" : "LEFT", entity.EntityId, value);
             };
+
+            RegisterAttunementDiagCommand(api);
+        }
+
+        /// <summary>
+        /// E1.6: Elf attunement diagnostics -- the float, the resolved context, and (the part
+        /// that matters most when this misbehaves) which of the three GetAttunementContext
+        /// checks individually passed or failed, plus which threshold bands are currently
+        /// active. Explicitly disposable, not the HUD -- same spirit as /rfphase0/rfrotdiag.
+        /// Server-side only: ElfAttunementBehavior's live value lives in behavior memory plus
+        /// WatchedAttributes, both only meaningful against the real server entity.
+        /// </summary>
+        private void RegisterAttunementDiagCommand(ICoreServerAPI api)
+        {
+            api.ChatCommands.Create("rfattune")
+                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds.")
+                .RequiresPrivilege(Privilege.chat)
+                .HandleWith(args =>
+                {
+                    IPlayer player = args.Caller.Player;
+                    if (player == null)
+                        return TextCommandResult.Success("No player context.");
+
+                    var cfg = Config;
+                    if (cfg == null)
+                        return TextCommandResult.Success("Config not loaded.");
+
+                    Entity entity = player.Entity;
+                    var behavior = entity.GetBehavior<ElfAttunementBehavior>();
+                    if (behavior == null)
+                        return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
+
+                    AttunementDiagnostics diag = ElfAttunementContext.GetDiagnostics(entity);
+
+                    bool[] active = behavior.ActiveThresholdsSnapshot;
+                    var thresholdParts = new System.Collections.Generic.List<string>();
+                    for (int i = 0; i < cfg.AttunementThresholds.Length; i++)
+                    {
+                        bool isActive = i < active.Length && active[i];
+                        thresholdParts.Add(string.Format("{0}={1}", cfg.AttunementThresholds[i], isActive ? "on" : "off"));
+                    }
+
+                    string msg = string.Format(
+                        "attunement={0:F2} isElf={1} context={2} checks[forestNaturalGround={3} forestPresenceStub={4} groveMembershipStub={5}] thresholds=[{6}]",
+                        behavior.LiveAttunement, behavior.IsElfCached, diag.Context,
+                        diag.ForestNaturalGround, diag.ForestPresence, diag.GroveTier.HasValue,
+                        string.Join(" ", thresholdParts));
+
+                    return TextCommandResult.Success(msg);
+                });
         }
 
         /// <summary>
