@@ -160,6 +160,14 @@ namespace rfmechanics
             // DwarfOreSongModSystem's StartClientSide-time api.World.Blocks iteration, just on
             // the opposite side.
             if (config != null) ElfAttunementBlockWhitelist.Resolve(api, config);
+
+            // E1.4: one logging subscriber to prove the threshold-crossing surface fires
+            // correctly (including on the way down) -- no gameplay effects exist yet.
+            ElfAttunementBehavior.ThresholdCrossed += (entity, threshold, active, value) =>
+            {
+                api.Logger.Notification("[rfmechanics] ElfAttunement threshold {0} {1} for entity {2} (value={3:F2})",
+                    threshold, active ? "ENTERED" : "LEFT", entity.EntityId, value);
+            };
         }
 
         /// <summary>

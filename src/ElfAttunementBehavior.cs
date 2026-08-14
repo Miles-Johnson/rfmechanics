@@ -23,11 +23,27 @@ namespace rfmechanics
     /// like a real None context, so a race swap away from Elf self-heals the value back to 0
     /// over time instead of leaving it stuck.
     /// </summary>
+    /// <summary>threshold: which of RFMechanicsConfig.AttunementThresholds was crossed. active:
+    /// true if this crossing was upward (value now at/above threshold), false if downward. A
+    /// subscriber holds a bool per threshold rather than ever polling Attunement -- see
+    /// ElfAttunementBehavior.EvaluateThresholds.</summary>
+    public delegate void AttunementThresholdHandler(Entity entity, int threshold, bool active, float value);
+
     public class ElfAttunementBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-elf-attunement";
 
+        /// <summary>Fires once per threshold per crossing direction -- never a storm, see
+        /// EvaluateThresholds' Schmitt-trigger hysteresis. Static: effects (Phase 2+) subscribe
+        /// once at mod start rather than per-entity.</summary>
+        public static event AttunementThresholdHandler ThresholdCrossed;
+
         private float accum;
+
+        /// <summary>Per-threshold active/inactive state (parallel to
+        /// RFMechanicsConfig.AttunementThresholds), used only to detect crossings -- see
+        /// EvaluateThresholds.</summary>
+        private bool[] activeThresholds;
 
         /// <summary>True live value, stepped every tick. Lazily initialized from the persisted
         /// WatchedAttributes value on the first qualifying tick after (re)load, so a relogged
@@ -115,10 +131,49 @@ namespace rfmechanics
             float rate = liveAttunement < target ? gainRate : (float)cfg.AttunementDecayRate;
             liveAttunement = StepToward(liveAttunement, target, rate, (float)cfg.AttunementTickInterval);
 
+            EvaluateThresholds(cfg);
+
             if (Math.Abs(liveAttunement - lastFlushedAttunement) > (float)cfg.AttunementWriteThreshold)
             {
                 Attunement = liveAttunement;
                 lastFlushedAttunement = Attunement; // read back post-clamp, in case liveAttunement ever drifted outside [0,100]
+            }
+        }
+
+        /// <summary>
+        /// Schmitt trigger per threshold: once ACTIVE, only deactivates below (threshold -
+        /// half); once inactive, only activates at/above (threshold + half). Evaluated against
+        /// liveAttunement (the true value) every tick, independent of whether this tick also
+        /// flushed to WatchedAttributes -- thresholds must not miss a crossing just because the
+        /// write-gate held it back.
+        ///
+        /// Why this can't storm: AttunementThresholdHysteresis is sized above the largest
+        /// possible single-tick delta (see its own doc comment), so a value cannot cross both
+        /// trip points in one tick from rest -- reactivating after a deactivation needs at
+        /// least one more full tick of sustained movement in the same direction, not noise.
+        /// StepToward's linear clamp-at-target behavior (see its own doc comment) additionally
+        /// means a value that reaches a ceiling holds there exactly, with no floating-point
+        /// wobble to trigger chatter in the first place -- the hysteresis band mainly guards
+        /// the case of a genuinely flickering context (e.g. pacing in and out of forest cover)
+        /// landing a value close to a threshold.
+        /// </summary>
+        private void EvaluateThresholds(RFMechanicsConfig cfg)
+        {
+            int[] thresholds = cfg.AttunementThresholds;
+            if (activeThresholds == null || activeThresholds.Length != thresholds.Length)
+                activeThresholds = new bool[thresholds.Length];
+
+            float half = (float)cfg.AttunementThresholdHysteresis / 2f;
+            for (int i = 0; i < thresholds.Length; i++)
+            {
+                int t = thresholds[i];
+                bool wasActive = activeThresholds[i];
+                bool nowActive = wasActive ? liveAttunement > t - half : liveAttunement >= t + half;
+
+                if (nowActive == wasActive) continue;
+
+                activeThresholds[i] = nowActive;
+                ThresholdCrossed?.Invoke(entity, t, nowActive, liveAttunement);
             }
         }
 

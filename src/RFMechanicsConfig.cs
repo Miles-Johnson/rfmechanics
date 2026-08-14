@@ -177,6 +177,21 @@ public class RFMechanicsConfig
     /// write-gated stat in this codebase.</summary>
     public double AttunementWriteThreshold { get; set; } = 0.5;
 
+    /// <summary>Attunement thresholds, in ascending order, that fire
+    /// ElfAttunementBehavior.ThresholdCrossed on crossing in either direction. Effects
+    /// (Phase 2+) subscribe and hold a bool per threshold rather than ever polling Attunement
+    /// directly.</summary>
+    public int[] AttunementThresholds { get; set; } = new[] { 10, 25, 45, 100 };
+
+    /// <summary>Full width of the dead band around each threshold (Schmitt trigger: activates
+    /// at threshold + half, deactivates at threshold - half) -- prevents a value hovering near
+    /// a threshold from firing a crossing event every tick. Must exceed the largest possible
+    /// single-tick delta, i.e. max(AttunementDecayRate, AttunementGainRateGrove,
+    /// AttunementGainRateWild) * AttunementTickInterval (= max(1.0, 1.0, 0.3) * 2.0 = 2.0 at
+    /// current defaults) -- sized here at 2.5 for headroom. Re-check this bound if the rate or
+    /// interval defaults change; it is not derived automatically.</summary>
+    public double AttunementThresholdHysteresis { get; set; } = 2.5;
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>
