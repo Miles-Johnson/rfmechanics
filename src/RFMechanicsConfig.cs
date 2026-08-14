@@ -137,6 +137,46 @@ public class RFMechanicsConfig
         "log-grown-", "log-placed-"
     };
 
+    /// <summary>Per-second gain rate toward WildCeiling while in AttunementContextKind.WildForest.
+    /// Deliberately much slower than AttunementDecayRate (0.3 vs 1.0, ~1:3.3) so a nomadic elf
+    /// who dips in and out of forest cover trends toward hovering in the 5-15 band rather than
+    /// banking the full 25-point WildCeiling -- reaching WildCeiling outright needs ~83s of
+    /// fully uninterrupted forest presence at this rate, while a single tick spent outside
+    /// forest erases more than 3 ticks worth of that gain.</summary>
+    public double AttunementGainRateWild { get; set; } = 0.3;
+
+    /// <summary>Per-second gain rate toward a grove's own tier ceiling while in
+    /// AttunementContextKind.Grove. Groves don't exist yet (E1.2's grove check is stubbed to
+    /// never fire), so this is provisional/untested -- set at parity with AttunementDecayRate
+    /// (unlike the wild-forest rate) on the reasoning that a grove should be a genuinely
+    /// faster, more rewarding attunement path than wandering wild forest, not just a higher
+    /// ceiling reached at the same crawl. Revisit once Phase 1b/2 grove tiers exist.</summary>
+    public double AttunementGainRateGrove { get; set; } = 1.0;
+
+    /// <summary>Per-second decay rate toward the context's floor -- toward 0 in
+    /// AttunementContextKind.None, or back down toward WildCeiling/the grove ceiling if a value
+    /// somehow sits above it. At this rate a full WildCeiling's worth of attunement (25) drains
+    /// in 25s of leaving forest entirely.</summary>
+    public double AttunementDecayRate { get; set; } = 1.0;
+
+    /// <summary>Gain ceiling in AttunementContextKind.WildForest. Values above this decay back
+    /// toward it (AttunementDecayRate) rather than being hard-clamped -- see
+    /// ElfAttunementBehavior's tick step. Not coincidentally equal to one of
+    /// AttunementThresholds' four bands (25) -- an elf resting steadily in wild forest settles
+    /// exactly on that threshold.</summary>
+    public double AttunementWildCeiling { get; set; } = 25.0;
+
+    /// <summary>Minimum change in the live (in-memory) attunement value before it is flushed to
+    /// WatchedAttributes -- same write-avoidance pattern as TreeProximityStatWriteThreshold.
+    /// Unlike that field's source (fully recomputed from scratch every tick), attunement is an
+    /// accumulator, so ElfAttunementBehavior tracks the true value in memory between flushes
+    /// rather than re-deriving it from the last-written WatchedAttributes value -- otherwise a
+    /// sub-threshold delta would be silently lost every tick instead of accumulating. One
+    /// consequence: up to this much progress can be lost if the entity unloads between
+    /// flushes (e.g. a relog) -- accepted as a small, bounded tradeoff, same shape as any
+    /// write-gated stat in this codebase.</summary>
+    public double AttunementWriteThreshold { get; set; } = 0.5;
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>

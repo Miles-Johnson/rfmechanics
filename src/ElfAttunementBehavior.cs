@@ -1,3 +1,4 @@
+using System;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.MathTools;
@@ -8,23 +9,32 @@ namespace rfmechanics
     /// <summary>
     /// Phase 1a of the Elf attunement system. Owns a single 0-100 "attunement" float in
     /// WatchedAttributes -- this behavior is the ONLY writer of that key. Reasserts ownership
-    /// every slow tick (re-clamped on every write via the Attunement property setter, same
-    /// self-heal spirit as BandBehavior's entitySize drift-correction).
-    ///
-    /// This task (E1.1) only establishes ownership of the float, the race gate, and the
-    /// cached-bool contract Phase 3 will read from a physics-rate context -- the actual
-    /// gain/decay-toward-ceiling step (E1.3) and threshold-crossing events (E1.4) land in
-    /// later Phase 1a tasks on top of this skeleton.
+    /// every slow tick: the true value lives in liveAttunement (in-memory) and is stepped every
+    /// tick toward GetAttunementContext's ceiling/floor, flushed to WatchedAttributes (clamped
+    /// via the Attunement property setter) only once the drift since the last flush exceeds
+    /// AttunementWriteThreshold -- same write-avoidance shape as
+    /// RFTreeProximityBehavior.TrySet, adapted for an accumulator (see AttunementWriteThreshold's
+    /// doc comment for why a from-scratch recompute like TrySet's wouldn't work here).
     ///
     /// Attached to every player entity via a JSON patch (seraph-elfattunement.json), same
     /// convention as RFTreeProximityBehavior/ThewBehavior -- the elf-race gate lives inside
-    /// RefreshElfCache(), not in listener registration/lifecycle.
+    /// RefreshElfCache(), not in listener registration/lifecycle. Non-elves (and elves who lose
+    /// the trait mid-session) are stepped toward AttunementContext.None (decay to 0) exactly
+    /// like a real None context, so a race swap away from Elf self-heals the value back to 0
+    /// over time instead of leaving it stuck.
     /// </summary>
     public class ElfAttunementBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-elf-attunement";
 
         private float accum;
+
+        /// <summary>True live value, stepped every tick. Lazily initialized from the persisted
+        /// WatchedAttributes value on the first qualifying tick after (re)load, so a relogged
+        /// entity resumes from its last-flushed value, not from 0.</summary>
+        private float liveAttunement;
+        private bool liveInitialized;
+        private float lastFlushedAttunement;
 
         /// <summary>Cached elf-race result, refreshed every slow tick (and therefore within one
         /// tick interval of any characterClass change -- there is no separate change listener,
@@ -57,8 +67,77 @@ namespace rfmechanics
             if (accum < (float)cfg.AttunementTickInterval) return;
             accum = 0f;
 
+            if (!liveInitialized)
+            {
+                liveAttunement = Attunement;
+                lastFlushedAttunement = liveAttunement;
+                liveInitialized = true;
+            }
+
             RefreshElfCache();
+
+            AttunementContext context = IsElfCached
+                ? ElfAttunementContext.GetAttunementContext(entity)
+                : AttunementContext.None;
+
+            StepAttunement(context, cfg);
         }
+
+        /// <summary>
+        /// Single step-toward-target rule that covers all three AttunementContext rules at
+        /// once: gain toward a ceiling while below it, decay toward that same ceiling while
+        /// above it (WildForest's "any value ABOVE WildCeiling decays toward WildCeiling"),
+        /// and decay toward 0 in None (target 0 is always <= current since Attunement is
+        /// clamped to [0,100], so this always takes the decay branch for None). Grove mirrors
+        /// WildForest's shape in anticipation of Phase 1b/2, even though it can't fire yet
+        /// (E1.2's grove check is stubbed).
+        /// </summary>
+        private void StepAttunement(AttunementContext context, RFMechanicsConfig cfg)
+        {
+            float target;
+            float gainRate;
+            switch (context.Kind)
+            {
+                case AttunementContextKind.Grove:
+                    target = ResolveGroveCeiling(context.GroveTier, cfg);
+                    gainRate = (float)cfg.AttunementGainRateGrove;
+                    break;
+                case AttunementContextKind.WildForest:
+                    target = (float)cfg.AttunementWildCeiling;
+                    gainRate = (float)cfg.AttunementGainRateWild;
+                    break;
+                default:
+                    target = 0f;
+                    gainRate = 0f; // unreachable (target 0 is never above liveAttunement), kept for symmetry
+                    break;
+            }
+
+            float rate = liveAttunement < target ? gainRate : (float)cfg.AttunementDecayRate;
+            liveAttunement = StepToward(liveAttunement, target, rate, (float)cfg.AttunementTickInterval);
+
+            if (Math.Abs(liveAttunement - lastFlushedAttunement) > (float)cfg.AttunementWriteThreshold)
+            {
+                Attunement = liveAttunement;
+                lastFlushedAttunement = Attunement; // read back post-clamp, in case liveAttunement ever drifted outside [0,100]
+            }
+        }
+
+        /// <summary>Moves current toward target at ratePerSecond, clamped so it can never
+        /// overshoot -- a plain linear ramp, not exponential easing, so a value that reaches
+        /// its ceiling holds there exactly (no floating-point wobble around the target that
+        /// could otherwise cause threshold-crossing chatter, see E1.4's hysteresis).</summary>
+        private static float StepToward(float current, float target, float ratePerSecond, float dtSeconds)
+        {
+            float delta = ratePerSecond * dtSeconds;
+            if (current < target) return Math.Min(target, current + delta);
+            if (current > target) return Math.Max(target, current - delta);
+            return current;
+        }
+
+        /// <summary>Groves don't exist yet (Phase 1b/2) -- E1.2's grove check never returns a
+        /// tier, so this is unreachable in Phase 1a. Falls back to WildCeiling so the branch is
+        /// still well-defined rather than throwing if it's ever hit early.</summary>
+        private static float ResolveGroveCeiling(int tier, RFMechanicsConfig cfg) => (float)cfg.AttunementWildCeiling;
 
         /// <summary>
         /// Guard chain matching every other rfmechanics elf gate (see
