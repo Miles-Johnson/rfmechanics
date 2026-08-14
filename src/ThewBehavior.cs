@@ -26,7 +26,6 @@ namespace rfmechanics
     public class ThewBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-orc-thew";
-        private const float TickInterval = 6.0f;
 
         /// <summary>Phase 2 (T1): last EnumFoodCategory an orc ate, written unconditionally by
         /// ThewEatPulsePatch on every qualifying eat event (regardless of whether that event's
@@ -54,7 +53,7 @@ namespace rfmechanics
             if (cfg == null || !cfg.EnableThew) return;
 
             accum += deltaTime;
-            if (accum < TickInterval) return;
+            if (accum < (float)cfg.ThewTickInterval) return;
             accum = 0f;
 
             bool isOrc = IsOrc();
@@ -70,7 +69,7 @@ namespace rfmechanics
             bool proteinGated = IsProteinGated(hunger, cfg);
             bool foodTypeBlocksGain = cfg.EnableThewFoodTypeGate && LastFoodBlocksGain();
 
-            float hourFraction = TickInterval / 3600f;
+            float hourFraction = (float)cfg.ThewTickInterval / 3600f;
             var band = entity.GetBehavior<BandBehavior>()?.CurrentBand ?? BandBehavior.Band.Lean;
 
             if (proteinGated && rampMult > 0f && !foodTypeBlocksGain)

@@ -97,7 +97,7 @@ namespace rfmechanics
                 float flush = __instance.entity.Attributes.GetFloat(KeyFlushTimer) + deltaTime;
                 __instance.entity.Attributes.SetFloat(KeyFlushTimer, flush);
 
-                if (flush > 10f)
+                if (flush > (float)cfg.ClimbSaturationFlushIntervalSeconds)
                 {
                     __instance.entity.Attributes.SetFloat(KeyFlushTimer, 0f);
 

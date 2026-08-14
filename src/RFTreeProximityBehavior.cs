@@ -24,7 +24,6 @@ namespace rfmechanics
     /// </summary>
     public class RFTreeProximityBehavior : EntityBehavior
     {
-        private const float TickInterval = 3.0f;
 
         private float accum;
         private float lastWalkspeed = 1f;
@@ -41,7 +40,7 @@ namespace rfmechanics
             if (cfg == null || !cfg.EnableTreeProximitySpeed) return;
 
             accum += deltaTime;
-            if (accum < TickInterval) return;
+            if (accum < (float)cfg.TreeProximityTickInterval) return;
             accum = 0f;
 
             if (!IsElf())

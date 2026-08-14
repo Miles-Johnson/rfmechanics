@@ -147,6 +147,8 @@ namespace rfmechanics
             if (!retryScheduled.TryAdd(entity, sentinel))
                 return;
 
+            int retryDelayMs = RFMechanicsModSystem.Config?.ClimbLinkRetryDelayMs ?? 2000;
+
             entity.World.RegisterCallback(dt =>
             {
                 try
@@ -192,7 +194,7 @@ namespace rfmechanics
                             "[rfmechanics] Exception in ClimbSpeedPatch retry: {0}", ex);
                     }
                 }
-            }, 2000);
+            }, retryDelayMs);
         }
 
         /// <summary>

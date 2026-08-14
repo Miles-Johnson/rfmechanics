@@ -41,7 +41,6 @@ namespace rfmechanics
     /// </summary>
     public class RFGoblinTunnelBehavior : EntityBehavior
     {
-        private const float TickInterval = 3.0f;
 
         private float accum;
         private float lastWalkspeed = 1f;
@@ -59,7 +58,7 @@ namespace rfmechanics
             if (cfg == null || !cfg.EnableGoblinTunnelSpeed) return;
 
             accum += deltaTime;
-            if (accum < TickInterval) return;
+            if (accum < (float)cfg.GoblinTunnelTickInterval) return;
             accum = 0f;
 
             if (!IsGoblin())

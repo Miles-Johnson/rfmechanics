@@ -31,7 +31,6 @@ namespace rfmechanics
         private const string BandAttributeKey = "rf-orc-band";
         private const string ActiveKey = "rf-orc-band-active";
         private const string StatSource = "rf-orc-band";
-        private const float TickInterval = 6.0f; // matches ThewBehavior's cadence
 
         private float accum;
         private bool midLerp;
@@ -82,7 +81,7 @@ namespace rfmechanics
             if (midLerp) StepLerp(deltaTime);
 
             accum += deltaTime;
-            if (accum < TickInterval) return;
+            if (accum < (float)cfg.BandTickInterval) return;
             accum = 0f;
 
             bool isOrc = IsOrc();

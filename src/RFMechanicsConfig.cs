@@ -49,6 +49,15 @@ public class RFMechanicsConfig
     /// <summary>Master toggle for the climb saturation drain.</summary>
     public bool EnableClimbSaturation { get; set; } = true;
 
+    /// <summary>Batch interval, in seconds, for flushing banked climb time into a satiety
+    /// drain. ClimbSaturationPatch accumulates climb seconds every tick but only applies the
+    /// drain once this many seconds have passed, to avoid a Saturation write every tick.</summary>
+    public double ClimbSaturationFlushIntervalSeconds { get; set; } = 10.0;
+
+    /// <summary>Delay, in milliseconds, before ClimbSpeedPatch retries applying climb scaling
+    /// after the entity-link race (player.Entity null during construction).</summary>
+    public int ClimbLinkRetryDelayMs { get; set; } = 2000;
+
     // ── Branchy leaves passthrough (Elf) ──
 
     /// <summary>Trait code granting the branchy-leaves collision passthrough. Loaded from
@@ -75,6 +84,9 @@ public class RFMechanicsConfig
     /// Stats.Set -- avoids per-tick sync writes.</summary>
     public double TreeProximityStatWriteThreshold { get; set; } = 0.02;
 
+    /// <summary>Tick cadence, in seconds, for RFTreeProximityBehavior's tree scan.</summary>
+    public double TreeProximityTickInterval { get; set; } = 3.0;
+
     // ── Tree climbing (Elf) ──
 
     /// <summary>Master toggle for letting Elves climb standing tree trunks ("log-grown"
@@ -94,6 +106,9 @@ public class RFMechanicsConfig
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>
     public bool EnableThew { get; set; } = true;
+
+    /// <summary>Tick cadence, in seconds, for ThewBehavior's gain/decay evaluation.</summary>
+    public double ThewTickInterval { get; set; } = 6.0;
 
     /// <summary>Trait code for the orc race. Loaded from config so it is trivially changeable,
     /// mirroring DwarfTraitCode/ElfTraitCode. Wired to the actual character via a raceframework
@@ -286,6 +301,11 @@ public class RFMechanicsConfig
     /// anything to key off, but this lets bands be disabled while keeping Thew itself running.</summary>
     public bool EnableBands { get; set; } = true;
 
+    /// <summary>Tick cadence, in seconds, for BandBehavior's slow evaluation (band
+    /// hysteresis checks). Matches ThewTickInterval's cadence by convention, independently
+    /// tunable.</summary>
+    public double BandTickInterval { get; set; } = 6.0;
+
     /// <summary>Thew value at which Lean crosses up into Standard, and Standard up into Bulky.
     /// Hysteresis gap vs BandDownThresholds is deliberate -- see BandDownThresholds.</summary>
     public OrcBandUpDown BandUpThresholds { get; set; } = new OrcBandUpDown { LeanToStandard = 0.35, StandardToBulky = 0.70 };
@@ -370,6 +390,11 @@ public class RFMechanicsConfig
     /// to burn, but this lets burn be disabled while Thew/Bands keep running.</summary>
     public bool EnableBurn { get; set; } = true;
 
+    /// <summary>Tick cadence, in seconds, for BurnBehavior's slow evaluation (entry/exit
+    /// check). Matches ThewBehavior/BandBehavior's cadence by convention, independently
+    /// tunable.</summary>
+    public double BurnSlowTickInterval { get; set; } = 6.0;
+
     /// <summary>DEPRECATED as an activation gate (Phase 2 T3): the locked cubic burn model has no
     /// activation threshold -- heal/s = BurnMaxHealPerSecond * (1-healthFrac)^BurnCurveExponent is
     /// notionally active at any health below 100%, near-zero close to full health, escalating as
@@ -428,6 +453,10 @@ public class RFMechanicsConfig
     /// health-fraction trigger and spend from the same Thew pool (see FrenzyCurveExponent's doc
     /// comment for the composition rationale) but are separately disableable.</summary>
     public bool EnableFrenzy { get; set; } = true;
+
+    /// <summary>Tick cadence, in seconds, for FrenzyBehavior's slow evaluation (entry/exit
+    /// check). Matches Thew/Band/Burn's cadence by convention, independently tunable.</summary>
+    public double FrenzySlowTickInterval { get; set; } = 6.0;
 
     /// <summary>Exponent on the Frenzy curve -- same shape family as Burn (T3), same threshold-
     /// free trigger (health &lt; 100%, gated for performance only by
@@ -551,6 +580,9 @@ public class RFMechanicsConfig
 
     /// <summary>Master toggle for the goblin tunnel-speed walkspeed bonus.</summary>
     public bool EnableGoblinTunnelSpeed { get; set; } = true;
+
+    /// <summary>Tick cadence, in seconds, for RFGoblinTunnelBehavior's earth-check scan.</summary>
+    public double GoblinTunnelTickInterval { get; set; } = 3.0;
 
     /// <summary>Walkspeed bonus applied while a goblin is under diggable earth (Soil/Sand/
     /// Gravel-tier ceiling within 1-2 blocks overhead), Stats.Set source "tunneling".

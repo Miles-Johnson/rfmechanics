@@ -42,7 +42,6 @@ namespace rfmechanics
     /// </summary>
     public class FrenzyBehavior : EntityBehavior
     {
-        private const float SlowTickInterval = 6.0f; // matches Thew/Band/Burn cadence
         private const string StatSource = "rf-orc-frenzy";
 
         private float accum;
@@ -65,8 +64,10 @@ namespace rfmechanics
         {
             if (entity.World.Side != EnumAppSide.Server) return;
 
+            var cfg = RFMechanicsModSystem.Config;
+
             accum += deltaTime;
-            if (accum < SlowTickInterval) return;
+            if (accum < (float)(cfg?.FrenzySlowTickInterval ?? 6.0)) return;
             accum = 0f;
 
             Evaluate();

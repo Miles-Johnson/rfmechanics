@@ -44,7 +44,6 @@ namespace rfmechanics
         /// brief's own "full vanilla 15-hp bar" framing for BurnThewPerHp's doc comment.</summary>
         public const float ReferenceBarHp = 15f;
 
-        private const float SlowTickInterval = 6.0f; // matches ThewBehavior/BandBehavior cadence
 
         private float accum;
         private long fastListenerId = -1;
@@ -62,8 +61,10 @@ namespace rfmechanics
         {
             if (entity.World.Side != EnumAppSide.Server) return;
 
+            var cfg = RFMechanicsModSystem.Config;
+
             accum += deltaTime;
-            if (accum < SlowTickInterval) return;
+            if (accum < (float)(cfg?.BurnSlowTickInterval ?? 6.0)) return;
             accum = 0f;
 
             Evaluate();
