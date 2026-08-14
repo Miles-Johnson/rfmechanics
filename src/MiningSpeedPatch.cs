@@ -17,8 +17,8 @@ namespace rfmechanics
     /// No vanilla subclass overrides this method (verified against 1.21.5 decompile).
     ///
     /// NOTE: GetMiningSpeed's vanilla body already reads Stats.GetBlended("miningSpeedMul")
-    /// before this postfix runs, so RestedBehavior's Stats.Set("miningSpeedMul", "rested", ...)
-    /// composes multiplicatively with this patch's dwarf bonus — both apply, no conflict.
+    /// before this postfix runs, so any other writer of that blended stat composes
+    /// multiplicatively with this patch's dwarf bonus — both apply, no conflict.
     /// </summary>
     [HarmonyPatch(typeof(CollectibleObject), nameof(CollectibleObject.GetMiningSpeed))]
     public static class MiningSpeedPatch

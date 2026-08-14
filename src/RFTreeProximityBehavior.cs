@@ -14,12 +14,11 @@ namespace rfmechanics
     /// tick-throttled the same way (~3s, server-side only).
     ///
     /// Writes entity.Stats.Set("walkspeed", "treeproximity", value) -- a source distinct
-    /// from "trait" (rf-elf-positive's own flat walkspeed bonus, traits.json) and "rested"
-    /// (RestedBehavior), so it stacks additively via the WeightedSum blend instead of
-    /// overwriting either.
+    /// from "trait" (rf-elf-positive's own flat walkspeed bonus, traits.json), so it stacks
+    /// additively via the WeightedSum blend instead of overwriting it.
     ///
-    /// Attached to the player entity type via a JSON patch (seraph-treeproximity.json),
-    /// same as RestedBehavior via seraph-rested.json -- it ticks for every player, and the
+    /// Attached to the player entity type via a JSON patch (seraph-treeproximity.json) --
+    /// it ticks for every player, and the
     /// elf gate lives inside IsElf(), matching the guard-chain shape every other rfmechanics
     /// elf patch uses (BranchyLeavesPassthroughPatch).
     /// </summary>
@@ -117,7 +116,7 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// Write-threshold gate before Stats.Set, mirroring RestedBehavior.TrySet --
+        /// Write-threshold gate before Stats.Set --
         /// Stats.Set marks WatchedAttributes dirty on every call, so unconditional per-tick
         /// writes would cause sync stutter.
         /// </summary>

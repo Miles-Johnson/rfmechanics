@@ -31,7 +31,7 @@ namespace rfmechanics
     /// special-casing needed here (per the brief: if it doesn't, that's a Phase 3 bug).
     ///
     /// Same JSON-attach-to-every-player + internal IsOrc() gate pattern as ThewBehavior/
-    /// BandBehavior/RestedBehavior -- attached via seraph-thew.json, appended after the vanilla
+    /// BandBehavior -- attached via seraph-thew.json, appended after the vanilla
     /// "health" behavior in the server behaviors list, so by the time this behavior's own
     /// OnEntityReceiveDamage override runs (Entity.ReceiveDamage loops every behavior in list
     /// order, findings doc §4/§the ReceiveDamage source), EntityBehaviorHealth has already

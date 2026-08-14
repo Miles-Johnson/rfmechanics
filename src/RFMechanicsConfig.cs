@@ -58,45 +58,6 @@ public class RFMechanicsConfig
     /// <summary>Master toggle for the branchy-leaves collision passthrough.</summary>
     public bool EnableBranchyLeavesPassthrough { get; set; } = true;
 
-    // ── Rested ──
-
-    /// <summary>Master toggle for the Rested mechanic (behavior, drain, gain, and outputs).</summary>
-    public bool EnableRested { get; set; } = true;
-
-    /// <summary>Passive Rested gain per second while EnableRested is on. Applies regardless of activity.</summary>
-    public double RestedIdleGainPerSecond { get; set; } = 0.003;
-
-    /// <summary>Flat Rested gain per eat event (OnEntityReceiveSaturation call), not saturation-proportional.</summary>
-    public double RestedEatGainFlat { get; set; } = 0.05;
-
-    /// <summary>Rested drain per block broken, any material.</summary>
-    public double RestedBlockBreakDrain { get; set; } = 0.02;
-
-    /// <summary>Rested drain per second of sustained tool use (mining/chopping hold), not per interact tick.</summary>
-    public double RestedToolUseDrainPerSecond { get; set; } = 0.02;
-
-    /// <summary>Minimum change in a computed output stat value before it is re-written via Stats.Set.
-    /// Stats.Set marks WatchedAttributes dirty on every call; this threshold avoids per-tick sync writes.</summary>
-    public double RestedStatWriteThreshold { get; set; } = 0.02;
-
-    /// <summary>Max miningSpeedMul swing (+/-) at Rested=1/Rested=0, applied via Stats.Set source "rested".</summary>
-    public double RestedMiningSpeedBonus { get; set; } = 0.10;
-
-    /// <summary>Max forageDropRate swing (+/-) at Rested=1/Rested=0, applied via Stats.Set source "rested".</summary>
-    public double RestedForageDropBonus { get; set; } = 0.10;
-
-    /// <summary>Max wildCropDropRate swing (+/-) at Rested=1/Rested=0, applied via Stats.Set source "rested".</summary>
-    public double RestedWildCropDropBonus { get; set; } = 0.10;
-
-    /// <summary>Max hungerrate swing (+/-) at Rested=1/Rested=0 (inverted: rested = slower hunger).</summary>
-    public double RestedHungerRateBonus { get; set; } = 0.10;
-
-    /// <summary>Master toggle for the Rested tool-durability output (3e). Off by default; may slip.</summary>
-    public bool EnableRestedDurability { get; set; } = false;
-
-    /// <summary>Max durability-loss reduction (+/-) at Rested=1/Rested=0.</summary>
-    public double RestedDurabilityBonus { get; set; } = 0.10;
-
     // ── Tree proximity speed (Elf) ──
 
     /// <summary>Master toggle for the near-trees walkspeed bonus.</summary>
@@ -111,7 +72,7 @@ public class RFMechanicsConfig
     public double TreeProximityMaxBonus { get; set; } = 0.12;
 
     /// <summary>Minimum change in the computed walkspeed value before it is re-written via
-    /// Stats.Set. Mirrors RestedStatWriteThreshold -- avoids per-tick sync writes.</summary>
+    /// Stats.Set -- avoids per-tick sync writes.</summary>
     public double TreeProximityStatWriteThreshold { get; set; } = 0.02;
 
     // ── Tree climbing (Elf) ──
@@ -508,8 +469,7 @@ public class RFMechanicsConfig
     /// <summary>Minimum change in Frenzy's computed walkspeed/meleeWeaponsDamage stat values
     /// before they're re-written via Stats.Set -- Frenzy recomputes every fast tick (the bonus
     /// tracks current healthFrac continuously, not a value fixed at trigger time), so without a
-    /// write-avoidance threshold this would spam WatchedAttributes dirty/sync on every tick.
-    /// Mirrors RestedStatWriteThreshold's identical role and reasoning.</summary>
+    /// write-avoidance threshold this would spam WatchedAttributes dirty/sync on every tick.</summary>
     public double FrenzyStatWriteThreshold { get; set; } = 0.02;
 
     // ── Darkvision (Goblin) ──
@@ -599,8 +559,8 @@ public class RFMechanicsConfig
     public double GoblinTunnelSpeedBonus { get; set; } = 0.15;
 
     /// <summary>Minimum change in the computed tunneling walkspeed value before it is
-    /// re-written via Stats.Set. Mirrors RestedStatWriteThreshold/
-    /// TreeProximityStatWriteThreshold -- avoids per-tick sync writes.</summary>
+    /// re-written via Stats.Set. Mirrors TreeProximityStatWriteThreshold -- avoids
+    /// per-tick sync writes.</summary>
     public double GoblinTunnelStatWriteThreshold { get; set; } = 0.02;
 
     // ── Goblin spit-packed earth (Phase G2) ──

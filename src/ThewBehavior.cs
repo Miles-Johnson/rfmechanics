@@ -16,7 +16,7 @@ namespace rfmechanics
     /// adds a small flat grant on qualifying bites, cooldown-gated.
     ///
     /// Attached to every player entity via a JSON patch (seraph-thew.json), same convention as
-    /// RestedBehavior/RFTreeProximityBehavior -- the orc-race gate lives inside OnGameTick
+    /// RFTreeProximityBehavior -- the orc-race gate lives inside OnGameTick
     /// (IsOrc()), not in listener registration/lifecycle. This means a live race swap needs no
     /// special-casing: swapping into orc starts passing the gate on the next tick, swapping out
     /// simply stops updating Thew (the stored value sits dormant, unread by anything else),

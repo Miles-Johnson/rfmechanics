@@ -14,13 +14,15 @@ not already verified in this session.
 - Config: rfmechanics.json in ModConfig folder, loaded in Start()
 - Soft coupling to raceframework: trait code is a config string, no hard dep
 - All tuning values in config, none hardcoded
-- Stats.Set is used only by RestedBehavior, for 4 blended engine stat channels
-  (miningSpeedMul, forageDropRate, wildCropDropRate, hungerrate), source string "rested".
-  Each is written only on a >RestedStatWriteThreshold change, since Stats.Set marks
-  WatchedAttributes "stats" dirty on every call and unconditional per-tick writes cause
-  sync stutter. This is a deliberate, scoped exception for multi-source blended stats —
-  bespoke on-demand postfix math (Dwarf mining/ore curves, climb speed) still must not
-  use Stats.Set.
+- Stats.Set is used for multi-source blended engine stat channels (e.g. walkspeed via
+  RFTreeProximityBehavior/RFGoblinTunnelBehavior, source strings "treeproximity"/
+  "tunneling"). Each is written only on a threshold-gated change (see each behavior's
+  *StatWriteThreshold config field), since Stats.Set marks WatchedAttributes "stats"
+  dirty on every call and unconditional per-tick writes cause sync stutter. This is a
+  deliberate, scoped exception for multi-source blended stats — bespoke on-demand
+  postfix math (Dwarf mining/ore curves, climb speed) still must not use Stats.Set.
+  (Rested, formerly the main Stats.Set consumer here, was deleted in Phase 0 of the
+  Elf attunement work, 2026-08-14 — see HANDOVER.md.)
 - Material gate: only apply mining speed bonus to Ore/Stone blocks
 - Class guard: treat null characterClass as not-a-dwarf
 

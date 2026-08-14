@@ -57,7 +57,7 @@ namespace rfmechanics.BugRace
         // [HarmonyPostfix]   // DISABLED -- see banner comment above
         public static void Postfix(IWorldAccessor world, BlockPos pos, IPlayer byPlayer)
         {
-            // ── Guard 1: null player (outside try, mirrors RestedBlockBreakPatch) ──
+            // ── Guard 1: null player (outside try) ──
             if (byPlayer?.Entity == null)
                 return;
 

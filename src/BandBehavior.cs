@@ -15,8 +15,8 @@ namespace rfmechanics
     /// sharing a class -- ThewBehavior reads this behavior's CurrentBand for its own per-band
     /// gain multiplier and Bulky hold-decay (see ThewBehavior.OnGameTick).
     ///
-    /// Same EntityBehavior-with-internal-orc-check pattern as ThewBehavior/RestedBehavior/
-    /// RFTreeProximityBehavior: attached to every player via a JSON patch, gated by IsOrc()
+    /// Same EntityBehavior-with-internal-orc-check pattern as ThewBehavior/RFTreeProximityBehavior:
+    /// attached to every player via a JSON patch, gated by IsOrc()
     /// inside the tick, not by listener lifecycle. This means live race-swap needs no special
     /// handling for entry (next tick just starts passing the gate) -- but band-derived Stats.Set
     /// entries DO need explicit cleanup on swap-away, unlike Thew's own hidden float, since a

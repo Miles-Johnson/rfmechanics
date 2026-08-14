@@ -29,10 +29,9 @@ namespace rfmechanics
             // Load config — load-then-store pattern
             LoadConfig(api);
 
-            api.Logger.Notification("[rfmechanics] Config loaded. DwarfTraitCode={0}, EnableMiningCurve={1}, EnableOreCurve={2}, OreThreshold={3}, OreCeiling={4}, ClimbSpeedFactor={5}, ClimbSaturationPerSecond={6}, EnableClimbSpeed={7}, EnableClimbSaturation={8}, ElfTraitCode={9}, EnableBranchyLeavesPassthrough={10}, EnableRested={11}, EnableTreeProximitySpeed={12}, TreeProximityRadius={13}, TreeProximityMaxBonus={14}, EnableTreeClimbing={15}, EnableFallDamageReduction={16}, FallDamageReductionFactor={17}, GoblinTraitCode={18}, EnableGoblinDarkvision={19}, GoblinDarkvisionStrength={20}, EnableGoblinFallDamageReduction={21}, GoblinFallDamageReductionFactor={22}",
-                config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableRested, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
+            api.Logger.Notification("[rfmechanics] Config loaded. DwarfTraitCode={0}, EnableMiningCurve={1}, EnableOreCurve={2}, OreThreshold={3}, OreCeiling={4}, ClimbSpeedFactor={5}, ClimbSaturationPerSecond={6}, EnableClimbSpeed={7}, EnableClimbSaturation={8}, ElfTraitCode={9}, EnableBranchyLeavesPassthrough={10}, EnableTreeProximitySpeed={11}, TreeProximityRadius={12}, TreeProximityMaxBonus={13}, EnableTreeClimbing={14}, EnableFallDamageReduction={15}, FallDamageReductionFactor={16}, GoblinTraitCode={17}, EnableGoblinDarkvision={18}, GoblinDarkvisionStrength={19}, EnableGoblinFallDamageReduction={20}, GoblinFallDamageReductionFactor={21}",
+                config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
 
-            api.RegisterEntityBehaviorClass("rfrested", typeof(RestedBehavior));
             api.RegisterEntityBehaviorClass("rftreeproximity", typeof(RFTreeProximityBehavior));
             api.RegisterEntityBehaviorClass("rfthew", typeof(ThewBehavior));
             api.RegisterEntityBehaviorClass("rfband", typeof(BandBehavior));
@@ -330,21 +329,18 @@ namespace rfmechanics
                     var hungerBhv = player.Entity.GetBehavior<EntityBehaviorHunger>();
                     string saturationStr = hungerBhv == null ? "(no hunger behavior)" : string.Format("{0:F1}/{1:F1}", hungerBhv.Saturation, hungerBhv.MaxSaturation);
 
-                    var restedBhv = player.Entity.GetBehavior<RestedBehavior>();
-                    string restedStr = restedBhv == null ? "(no rested behavior)" : string.Format("{0:F3}", restedBhv.Rested);
-
                     string msg = string.Format(
-                        "extraTraits=[{0}] walkspeed={1:F4} hungerrate={2:F4} rf-dwarf-positive={3} rf-dwarf-negative={4} dwarf-negative={5} {6}={7} bankedClimbSeconds={8:F2} flushTimer={9:F2} saturation={10} rested={11}",
-                        extraTraitsStr, walkspeed, hungerrate, hasPositive, hasRfNegative, hasLrNegative, config.ElfTraitCode, hasElfPositive, bankedClimbSeconds, flushTimer, saturationStr, restedStr);
+                        "extraTraits=[{0}] walkspeed={1:F4} hungerrate={2:F4} rf-dwarf-positive={3} rf-dwarf-negative={4} dwarf-negative={5} {6}={7} bankedClimbSeconds={8:F2} flushTimer={9:F2} saturation={10}",
+                        extraTraitsStr, walkspeed, hungerrate, hasPositive, hasRfNegative, hasLrNegative, config.ElfTraitCode, hasElfPositive, bankedClimbSeconds, flushTimer, saturationStr);
 
                     return TextCommandResult.Success(msg + "\n" + FormatStatBreakdown(player, "miningSpeedMul") + "\n" + FormatStatBreakdown(player, "forageDropRate") + "\n" + FormatStatBreakdown(player, "wildCropDropRate") + "\n" + FormatStatBreakdown(player, "hungerrate") + "\n" + FormatStatBreakdown(player, "walkspeed"));
                 });
         }
 
         /// <summary>
-        /// Per-source breakdown for a single blended stat category, e.g. "miningSpeedMul: base=1.00 trait=0.15 rested=0.08, blended=1.23".
+        /// Per-source breakdown for a single blended stat category, e.g. "miningSpeedMul: base=1.00 trait=0.15, blended=1.15".
         /// EntityStats' indexer throws if the category was never registered/set, so this
-        /// is defensive even though all four Rested-affected codes are registered on
+        /// is defensive even though the stat categories used here are registered on
         /// EntityPlayer at construction.
         /// A literal "->" here previously broke in-game chat rendering: the client's chat
         /// window parses message text as rich text (font tags etc.), and a bare "&gt;"

@@ -1,8 +1,0 @@
-[
-    {
-        "op": "add",
-        "path": "/server/behaviors/-",
-        "file": "game:entities/humanoid/player.json",
-        "value": { "code": "rfrested" }
-    }
-]

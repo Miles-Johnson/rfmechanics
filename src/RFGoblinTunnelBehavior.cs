@@ -31,11 +31,11 @@ namespace rfmechanics
     /// tunnel mouth doesn't flicker the bonus on/off every tick.
     ///
     /// Writes entity.Stats.Set("walkspeed", "tunneling", value) -- a source distinct from
-    /// "trait"/"rested"/"treeproximity", so it stacks additively via the WeightedSum blend
-    /// instead of overwriting any of them.
+    /// "trait"/"treeproximity", so it stacks additively via the WeightedSum blend
+    /// instead of overwriting either.
     ///
     /// Attached to the player entity type via a JSON patch (seraph-goblintunnel.json), same
-    /// as RestedBehavior/RFTreeProximityBehavior -- it ticks for every player, and the goblin
+    /// as RFTreeProximityBehavior -- it ticks for every player, and the goblin
     /// gate lives inside IsGoblin(), matching the guard-chain shape every other rfmechanics
     /// race-gated behavior uses.
     /// </summary>
@@ -133,8 +133,8 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// Write-threshold gate before Stats.Set, mirroring RestedBehavior.TrySet/
-        /// RFTreeProximityBehavior.TrySet -- Stats.Set marks WatchedAttributes dirty on every
+        /// Write-threshold gate before Stats.Set, mirroring RFTreeProximityBehavior.TrySet --
+        /// Stats.Set marks WatchedAttributes dirty on every
         /// call, so unconditional per-tick writes would cause sync stutter.
         /// </summary>
         private void TrySet(float newValue, RFMechanicsConfig cfg)

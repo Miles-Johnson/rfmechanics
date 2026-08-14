@@ -50,8 +50,7 @@ namespace rfmechanics
         private bool frenzied;
         private float thewSpentThisFrenzy;
 
-        // Write-cache for the threshold-gated Stats.Set calls, same role as
-        // RestedBehavior.lastMiningSpeedMul etc.
+        // Write-cache of the last value actually pushed via Stats.Set, so ties aren't rewritten.
         private float lastWalkSpeedDelta;
         private float lastMeleeDamageDelta;
 
@@ -194,8 +193,8 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>Write-threshold-gated, same reasoning/pattern as RestedBehavior.TrySet --
-        /// Frenzy recomputes continuously (curveMult tracks live healthFrac every fast tick), so
+        /// <summary>Write-threshold-gated -- Frenzy recomputes continuously (curveMult tracks
+        /// live healthFrac every fast tick), so
         /// an unconditional Stats.Set every tick would spam WatchedAttributes dirty/sync.</summary>
         private void ApplyStats(RFMechanicsConfig cfg, float curveMult)
         {
