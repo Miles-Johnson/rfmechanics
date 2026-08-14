@@ -102,6 +102,18 @@ public class RFMechanicsConfig
     /// <summary>Fraction of fall damage removed for Elves, e.g. 0.6 = 60% less fall damage.</summary>
     public double FallDamageReductionFactor { get; set; } = 0.6;
 
+    // ── Elf attunement (Phase 1a) ──
+
+    /// <summary>Master toggle for the Elf attunement system (ElfAttunementBehavior's owned
+    /// 0-100 WatchedAttributes float). Phase 1a only -- gain/decay and threshold effects land
+    /// in later Phase 1a tasks; this toggle already gates the behavior's tick from task one.</summary>
+    public bool EnableElfAttunement { get; set; } = true;
+
+    /// <summary>Tick cadence, in seconds, for ElfAttunementBehavior's slow tick (race-cache
+    /// refresh now; gain/decay evaluation from Phase 1a task E1.3 onward). Matches
+    /// GoblinRotAuraTickInterval's 2.0s precedent.</summary>
+    public double AttunementTickInterval { get; set; } = 2.0;
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>

@@ -33,6 +33,7 @@ namespace rfmechanics
                 config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
 
             api.RegisterEntityBehaviorClass("rftreeproximity", typeof(RFTreeProximityBehavior));
+            api.RegisterEntityBehaviorClass("rfelfattunement", typeof(ElfAttunementBehavior));
             api.RegisterEntityBehaviorClass("rfthew", typeof(ThewBehavior));
             api.RegisterEntityBehaviorClass("rfband", typeof(BandBehavior));
             api.RegisterEntityBehaviorClass("rfburn", typeof(BurnBehavior));
