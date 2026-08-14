@@ -39,6 +39,7 @@ namespace rfmechanics
         public static event AttunementThresholdHandler ThresholdCrossed;
 
         private float accum;
+        private bool staggerApplied;
 
         /// <summary>Per-threshold active/inactive state (parallel to
         /// RFMechanicsConfig.AttunementThresholds), used only to detect crossings -- see
@@ -78,6 +79,16 @@ namespace rfmechanics
 
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null || !cfg.EnableElfAttunement) return;
+
+            if (!staggerApplied)
+            {
+                // Stagger by entity hash so every elf doesn't evaluate on the same tick --
+                // trivial cost now (this task's tick body is cheap), but load-bearing once
+                // Phase 1b's forest census makes this scan per-chunk-costly and a synchronized
+                // spike across every elf on the server would actually be felt.
+                staggerApplied = true;
+                accum = ComputeStaggerOffset(entity.EntityId, (float)cfg.AttunementTickInterval);
+            }
 
             accum += deltaTime;
             if (accum < (float)cfg.AttunementTickInterval) return;
@@ -193,6 +204,19 @@ namespace rfmechanics
         /// tier, so this is unreachable in Phase 1a. Falls back to WildCeiling so the branch is
         /// still well-defined rather than throwing if it's ever hit early.</summary>
         private static float ResolveGroveCeiling(int tier, RFMechanicsConfig cfg) => (float)cfg.AttunementWildCeiling;
+
+        /// <summary>Deterministic per-entity fraction of one tick interval, used once to seed
+        /// accum so every elf's slow tick lands on a different real-time offset instead of all
+        /// firing on the same frame. EntityId increments monotonically and is already
+        /// well-distributed modulo a modulus not aligned to any power of two -- a full hash
+        /// function would add nothing here. Static/pure so it's trivially reasoned about (and
+        /// testable) independent of entity/tick state.</summary>
+        private static float ComputeStaggerOffset(long entityId, float interval)
+        {
+            if (interval <= 0f) return 0f;
+            long m = ((entityId % 997) + 997) % 997; // defensive against a hypothetical negative EntityId
+            return (m / 997f) * interval;
+        }
 
         /// <summary>
         /// Guard chain matching every other rfmechanics elf gate (see
