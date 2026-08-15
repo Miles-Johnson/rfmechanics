@@ -7,25 +7,15 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Dormant preserved-protein multiplier for orc (Part 2c of the Thew brief). Two-step stash
-    /// pattern across two Harmony prefixes, since CollectibleObject.tryEatStop's call into
-    /// ReceiveSaturation can't be intercepted directly with a prefix alone (no transpiler here):
-    ///
-    /// 1. PreservedProteinFlagPatch (prefix on CollectibleObject.tryEatStop) -- if the eater is
-    ///    orc and the eaten item's code matches PreservedProteinItemCodes, stashes a one-shot
-    ///    flag on the entity.
-    /// 2. PreservedProteinMultiplierPatch (prefix on EntityBehaviorHunger.OnEntityReceiveSaturation)
-    ///    -- reads and unconditionally clears that flag on every call (never let it survive to
-    ///    affect an unrelated future saturation event), scaling nutritionGainMultiplier by
-    ///    PreservedProteinMultiplier only when it was set.
-    ///
-    /// Both calls happen synchronously within the same tryEatStop invocation (findings §1: the
-    /// saturation grant happens before the stack is decremented, nothing else can interleave),
-    /// so the flag's lifetime never crosses a tick boundary.
-    ///
-    /// Dormant per the settled design: the default PreservedProteinItemCodes list (cured
-    /// redmeat/bushmeat) has no obtainable production path in survival (A5 finding) -- this
-    /// exists as a server-config surface for modded preserved foods, not active vanilla content.
+    /// Preserved-protein multiplier for orc. Two-step stash pattern across two Harmony prefixes,
+    /// since tryEatStop's call into ReceiveSaturation can't be intercepted directly with a
+    /// prefix alone (no transpiler here): PreservedProteinFlagPatch (prefix on tryEatStop)
+    /// stashes a one-shot flag when an orc eats a matching item; PreservedProteinMultiplierPatch
+    /// (prefix on OnEntityReceiveSaturation) reads and unconditionally clears that flag every
+    /// call, scaling nutritionGainMultiplier only when it was set. Both calls happen
+    /// synchronously within the same tryEatStop invocation, so the flag never crosses a tick
+    /// boundary. Dormant by default: the default PreservedProteinItemCodes have no obtainable
+    /// production path in survival -- this is a server-config surface for modded preserved foods.
     /// </summary>
     internal static class PreservedProteinFlag
     {
@@ -40,7 +30,6 @@ namespace rfmechanics
         [HarmonyPrefix]
         public static void Prefix(ItemSlot slot, EntityAgent byEntity)
         {
-            // ── Guard 1: EntityPlayer only (literal first statement, outside try) ──
             if (byEntity is not EntityPlayer player)
                 return;
 
@@ -53,9 +42,7 @@ namespace rfmechanics
                 if (cfg == null || !cfg.EnableThew)
                     return;
 
-                // Load-bearing: characterClass null check prevents HasTrait's null-class-returns-
-                // true default from charging classless players as orcs (same pattern as every
-                // other rfmechanics race gate -- see RFTreeProximityBehavior.IsElf).
+                // Load-bearing: prevents HasTrait's null-class-returns-true default from charging classless players as orcs.
                 string charClass = player.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass))
                     return;
@@ -112,9 +99,7 @@ namespace rfmechanics
                 if (!pending)
                     return;
 
-                // Always clear on read: this is a same-tick, single-use signal from
-                // PreservedProteinFlagPatch, never allowed to survive to an unrelated future
-                // saturation event regardless of what happens below.
+                // Always clear on read: a same-tick, single-use signal, never allowed to survive to an unrelated future saturation event.
                 entity.Attributes.RemoveAttribute(PreservedProteinFlag.PendingKey);
 
                 var cfg = RFMechanicsModSystem.Config;

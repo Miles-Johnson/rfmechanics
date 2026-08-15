@@ -8,27 +8,14 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Harmony postfix on Block.OnEntityCollide.
-    ///
-    /// Covers the second vanilla ladder-ascent method: walking into a climbable
-    /// block horizontally (no Jump needed) hard-sets Motion.Y to a fixed constant
-    /// (0.04) every tick the entity remains in contact, unless Sneak is held.
-    /// This is a completely separate mechanism from climbUpSpeed/climbDownSpeed
-    /// (see ClimbSpeedPatch, which only covers the Jump-held ascent path) — it
-    /// bypasses those fields entirely, so ClimbSpeedFactor previously had no
-    /// effect on this ascent method at all.
-    ///
-    /// The postfix re-checks the same conditions vanilla used (CanClimb,
-    /// IsClimbable/CanClimbAnywhere, horizontal facing, not Sneak) since a
-    /// postfix can't otherwise tell whether this call actually hit that branch.
-    /// It only rescales when Motion.Y ends up positive (ascending) — inherently
-    /// ascent-only, matching ClimbSpeedPatch's descent-untouched design. Vanilla
-    /// resets Motion.Y to the same absolute constant every tick it fires, so
-    /// rescaling it immediately after each time does not compound.
-    ///
-    /// EntityPlayer guard is the literal first statement, outside the try —
-    /// OnEntityCollide fires for every entity colliding with every block, not
-    /// just players.
+    /// Harmony postfix on Block.OnEntityCollide -- covers the second vanilla ladder-ascent
+    /// method (walking into a climbable block horizontally, no Jump needed), which hard-sets
+    /// Motion.Y to a fixed constant every tick and bypasses climbUpSpeed/climbDownSpeed
+    /// entirely (see ClimbSpeedPatch for the Jump-held path), so ClimbSpeedFactor previously
+    /// had no effect here. Re-checks vanilla's own conditions since a postfix can't otherwise
+    /// tell whether this call hit that branch; rescales only when Motion.Y is positive
+    /// (ascent-only). Vanilla resets Motion.Y to the same constant every tick it fires, so
+    /// rescaling after each call does not compound.
     /// </summary>
     [HarmonyPatch(typeof(Block), nameof(Block.OnEntityCollide))]
     public static class ClimbCollideAssistPatch
@@ -38,7 +25,6 @@ namespace rfmechanics
         [HarmonyPostfix]
         public static void Postfix(Block __instance, Entity entity, BlockPos pos, BlockFacing facing)
         {
-            // ── Guard 1: EntityPlayer only (literal first statement, outside try) ──
             if (entity is not EntityPlayer player)
                 return;
 
@@ -51,8 +37,7 @@ namespace rfmechanics
                 if (!cfg.EnableClimbSpeed)
                     return;
 
-                // Mirror vanilla's own gate (Block.OnEntityCollide) so we only
-                // touch Motion.Y on the same tick/branch vanilla actually set it.
+                // Mirrors vanilla's own gate so this only touches Motion.Y on the branch vanilla set it.
                 if (!player.Properties.CanClimb)
                     return;
 
@@ -63,10 +48,9 @@ namespace rfmechanics
                     return;
 
                 if (player.Controls.Sneak)
-                    return; // vanilla didn't touch Motion.Y this call either
+                    return;
 
-                // Class guard: no class = not a dwarf (overrides HasTrait's
-                // null-class-returns-true default).
+                // No class = not a dwarf; overrides HasTrait's null-class-returns-true default.
                 string charClass = player.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass))
                     return;
@@ -96,7 +80,6 @@ namespace rfmechanics
                     RFMechanicsModSystem.Api?.Logger?.Warning(
                         "[rfmechanics] Exception in ClimbCollideAssistPatch: {0}", ex);
                 }
-                // Leave Motion.Y unchanged on exception
             }
         }
     }

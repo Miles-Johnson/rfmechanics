@@ -6,39 +6,17 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Phase 2 (T4): Frenzy -- as health drops, an orc with Thew remaining gets faster and hits
-    /// harder, paid for out of the same Thew pool Burn (T3) spends from. Same shape family and
-    /// the same threshold-free trigger as Burn: bonus/cost all scale as
-    /// (1-healthFrac)^FrenzyCurveExponent, entered/exited via BurnActivationHealthFracGap (shared
-    /// with Burn -- both key off "how far below full health", not a separate design threshold of
-    /// their own; see BurnActivationHealthFracGap's doc comment on RFMechanicsConfig).
-    ///
-    /// Composition with Burn (per the brief's own framing -- "both spend the same resource under
-    /// the same trigger condition"): no shared budget, no priority ordering. Both read/write the
-    /// same clamped ThewBehavior.Thew property independently, the same no-coordination precedent
-    /// Burn already established on its own (thew-audit.md Q7) -- each behavior's own fast tick
-    /// checks its own floor (BurnThewFloor / FrenzyThewFloor) every tick and stops itself the
-    /// moment its own spend is no longer affordable. If Thew runs out mid-fight with both active,
-    /// each stops independently and at its own moment, not necessarily simultaneously (their
-    /// floors default to the same value but are configured separately).
-    ///
-    /// Deliberately does NOT special-case Band demotion. Frenzy spends Thew through the same
-    /// ThewBehavior.Thew setter every other writer uses; BandBehavior reacts on its own 6s tick
-    /// (or resolves multi-step now, see T5's EvaluateBand fix) with no coordination needed here.
-    /// A Bulky orc who frenzies and shrinks mid-fight, with Burn's healing shifting as the band
-    /// drops, is the intended self-sequencing behaviour and the primary visual tell -- no guard
-    /// against it is added, per the brief.
-    ///
-    /// "Drops the INSTANT health recovers above the trigger band. No duration timer": speed/
-    /// damage bonuses are computed fresh every fast tick from the CURRENT healthFrac and
-    /// instantly cleared (Stats.Remove, not a fade/lerp) the moment health recovers back above
-    /// the trigger gap or Thew runs out -- same instant-clear pattern as
-    /// BandBehavior.ClearBandStats.
-    ///
-    /// Structurally mirrors BurnBehavior throughout (temporary fast-tick listener registered only
-    /// while active, entry/exit evaluated on the shared 6s slow tick and immediately on damage,
-    /// same JSON-attach + internal IsOrc() gate pattern) -- see BurnBehavior's own header for the
-    /// rationale, not repeated here.
+    /// Frenzy: as health drops, an orc with Thew remaining gets faster and hits harder, paid
+    /// from the same Thew pool Burn spends from, via curveMult = (1-healthFrac)^
+    /// FrenzyCurveExponent, entered/exited off BurnActivationHealthFracGap (shared with Burn
+    /// intentionally -- both key off "how far below full health", not their own threshold).
+    /// No shared budget with Burn: each independently reads/writes ThewBehavior.Thew and stops
+    /// itself once its own floor is no longer affordable, so with both active they can stop at
+    /// different moments.
+    /// Deliberately does not special-case Band demotion -- a Bulky orc who frenzies and shrinks
+    /// mid-fight is the intended self-sequencing behavior, so no guard against it is added.
+    /// Structurally mirrors BurnBehavior (temporary fast-tick listener, same JSON-attach/IsOrc
+    /// gate) -- see BurnBehavior's header for the rationale.
     /// </summary>
     public class FrenzyBehavior : EntityBehavior
     {
@@ -91,10 +69,7 @@ namespace rfmechanics
             StopFrenzy();
         }
 
-        /// <summary>Enter/exit check -- mirrors BurnBehavior.Evaluate exactly, including reusing
-        /// BurnActivationHealthFracGap as the shared, performance-only entry/exit gate (see class
-        /// banner comment on why Burn and Frenzy share this one trigger rather than each having
-        /// their own).</summary>
+        /// <summary>Mirrors BurnBehavior.Evaluate, including reuse of BurnActivationHealthFracGap as the shared entry/exit gate.</summary>
         private void Evaluate()
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -138,17 +113,12 @@ namespace rfmechanics
             }
             frenzied = false;
 
-            // Instant clear, no fade -- "drops the INSTANT health recovers", per the brief.
+            // Instant clear, no fade -- bonus drops the instant health recovers above the trigger.
             ClearStats();
         }
 
-        /// <summary>Deducts Thew and recomputes the speed/damage bonus every fast tick, both
-        /// driven by the SAME curveMult from the CURRENT healthFrac -- so as a frenzied orc takes
-        /// further damage mid-session, both the bonus and the cost escalate together, not just at
-        /// entry. Unlike BurnBehavior.FastTick, Thew spend here is never partial-tick-clamped
-        /// down to "exactly what's affordable" -- it simply stops the moment nothing is left
-        /// above the floor, since (unlike Burn's per-hp cost) there is no discrete unit ("one
-        /// more hp") to fractionally afford.</summary>
+        /// <summary>Bonus and Thew cost are both driven by the same curveMult from the current
+        /// healthFrac, so they escalate together as health drops further within a session.</summary>
         private void FastTick(float deltaTime)
         {
             if (entity.World.Side != EnumAppSide.Server) { StopFrenzy(); return; }
@@ -194,9 +164,7 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>Write-threshold-gated -- Frenzy recomputes continuously (curveMult tracks
-        /// live healthFrac every fast tick), so
-        /// an unconditional Stats.Set every tick would spam WatchedAttributes dirty/sync.</summary>
+        /// <summary>Write-threshold-gated: curveMult recomputes every fast tick, so an unconditional Stats.Set every tick would spam WatchedAttributes dirty/sync.</summary>
         private void ApplyStats(RFMechanicsConfig cfg, float curveMult)
         {
             float threshold = (float)cfg.FrenzyStatWriteThreshold;
@@ -224,8 +192,7 @@ namespace rfmechanics
             lastMeleeDamageDelta = 0f;
         }
 
-        /// <summary>Guard chain matching every other rfmechanics race gate -- see
-        /// ThewBehavior.IsOrc's own comment for why the null charClass check is load-bearing.</summary>
+        // charClass null-check is load-bearing: HasTrait treats an unset class as trait-having, not trait-lacking.
         private bool IsOrc()
         {
             var cfg = RFMechanicsModSystem.Config;

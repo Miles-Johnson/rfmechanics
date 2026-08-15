@@ -7,28 +7,16 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Harmony prefix on EntityBehaviorHealth.OnEntityReceiveDamage.
-    ///
-    /// Replaces the earlier RFFallDamageBehavior (plain EntityBehavior) approach: that relied
-    /// on Entity.ReceiveDamage's foreach over SidedProperties.Behaviors mutating a single
-    /// shared `ref float damage` in array order (Entity.cs:962-1017), but "rffalldamage" is
-    /// appended to the END of player.json's server/behaviors array (seraph-falldamage.json,
-    /// `/-` path) while vanilla's "health" behavior sits at index 4 — so EntityBehaviorHealth's
-    /// own OnEntityReceiveDamage (VSEssentials, EntityBehaviorHealth.cs:226-267) always ran
-    /// first and applied `Health -= damage` (line 252) with the full, unreduced damage before
-    /// this behavior's reduction ever executed. A Harmony prefix runs before that method body
-    /// unconditionally, regardless of behaviors-array order, so it sidesteps the ordering bug
-    /// entirely.
-    ///
-    /// Gated on damageSource.Source == EnumDamageSource.Fall specifically, not
-    /// damageSource.Type -- EntityBehaviorHealth.OnFallToGround is the sole place that raises
-    /// fall damage, and it always sets Source to Fall.
-    ///
-    /// Also covers Goblin (Phase G1), with its own config toggle/factor
-    /// (EnableGoblinFallDamageReduction/GoblinFallDamageReductionFactor) -- kept as one patch on
-    /// one method rather than a second Harmony patch on the same target, since a player is only
-    /// ever one race and stacking two independent patches on the same method risks
-    /// patch-ordering ambiguity for no benefit.
+    /// Harmony prefix on EntityBehaviorHealth.OnEntityReceiveDamage. Replaces the earlier
+    /// RFFallDamageBehavior approach: "rffalldamage" was appended to the END of player.json's
+    /// behaviors array, after vanilla's "health" behavior, so EntityBehaviorHealth always
+    /// applied the full unreduced damage before this behavior's reduction ran. A Harmony prefix
+    /// runs before the method body unconditionally regardless of behaviors-array order,
+    /// sidestepping that ordering bug entirely.
+    /// Gated on damageSource.Source == EnumDamageSource.Fall (not .Type) -- OnFallToGround is
+    /// the sole source of fall damage and always sets Source to Fall.
+    /// Also covers Goblin fall damage reduction on this same patch rather than a second Harmony
+    /// patch on the same method, since a player is only ever one race.
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorHealth), nameof(EntityBehaviorHealth.OnEntityReceiveDamage))]
     public static class FallDamagePatch
@@ -38,7 +26,6 @@ namespace rfmechanics
         [HarmonyPrefix]
         public static void Prefix(EntityBehaviorHealth __instance, DamageSource damageSource, ref float damage)
         {
-            // ── Guard 1: literal first statement, outside try ──
             if (__instance.entity is not EntityPlayer player)
                 return;
 
@@ -54,9 +41,7 @@ namespace rfmechanics
                 if (cfg == null)
                     return;
 
-                // Class guard: no class = not this race (overrides HasTrait's
-                // null-class-returns-true default). Same guard chain shape as every other
-                // rfmechanics race gate (BranchyLeavesPassthroughPatch, TreeClimbingPatch).
+                // No class = not this race; overrides HasTrait's null-class-returns-true default.
                 string charClass = player.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass))
                     return;
@@ -89,7 +74,6 @@ namespace rfmechanics
                     RFMechanicsModSystem.Api?.Logger?.Warning(
                         "[rfmechanics] Exception in FallDamagePatch: {0}", ex);
                 }
-                // Leave damage unchanged on exception
             }
         }
     }

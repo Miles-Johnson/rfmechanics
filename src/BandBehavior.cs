@@ -7,22 +7,10 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Orc Band state machine (Phase 3) -- Lean/Standard/Bulky, driven off ThewBehavior's hidden
-    /// Thew value via hysteresis thresholds. Kept as a separate behavior from ThewBehavior
-    /// (rather than folded in) because the concerns are genuinely different: Thew is hidden
-    /// resource math, Bands are a visible state machine that owns entitySize and a wide stat
-    /// surface. They share the same 6s tick cadence and race-gate pattern by convention, not by
-    /// sharing a class -- ThewBehavior reads this behavior's CurrentBand for its own per-band
-    /// gain multiplier and Bulky hold-decay (see ThewBehavior.OnGameTick).
-    ///
-    /// Same EntityBehavior-with-internal-orc-check pattern as ThewBehavior/RFTreeProximityBehavior:
-    /// attached to every player via a JSON patch, gated by IsOrc()
-    /// inside the tick, not by listener lifecycle. This means live race-swap needs no special
-    /// handling for entry (next tick just starts passing the gate) -- but band-derived Stats.Set
-    /// entries DO need explicit cleanup on swap-away, unlike Thew's own hidden float, since a
-    /// stale walkspeed/hungerrate/etc. entry left under the "rf-orc-band" source key would
-    /// otherwise silently keep applying to a non-orc character (the same staleness class as the
-    /// documented Bug 2, see notes/rfmechanics-2026-07-30-session-notes.md).
+    /// Orc Band state machine (Lean/Standard/Bulky) driven by ThewBehavior's Thew via hysteresis.
+    /// Kept as its own behavior rather than folded into ThewBehavior: Thew is hidden resource
+    /// math, Bands are a visible state machine owning entitySize/stats; ThewBehavior reads
+    /// CurrentBand back for its own gain multiplier (see ThewBehavior.OnGameTick).
     /// </summary>
     public class BandBehavior : EntityBehavior
     {
@@ -44,11 +32,8 @@ namespace rfmechanics
         {
             base.Initialize(properties, attributes);
 
-            // One-time migration cleanup: bluntDamageFactor/crushingDamageFactor used to be
-            // written per-band under StatSource but are no longer applied. Initialize() runs
-            // once per behavior construction (every load and fresh spawn, before OnGameTick),
-            // so this clears any value stamped by the old code onto existing characters without
-            // a per-tick cost or a new persisted flag.
+            // One-time migration: clears bluntDamageFactor/crushingDamageFactor stamped by old
+            // code (no longer applied) onto existing characters; Initialize() runs once per load/spawn.
             entity.Stats.Remove("bluntDamageFactor", StatSource);
             entity.Stats.Remove("crushingDamageFactor", StatSource);
         }
@@ -70,14 +55,9 @@ namespace rfmechanics
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null || !cfg.EnableBands) return;
 
-            // Fast path: step any in-progress entitySize lerp every tick, not gated by the slow
-            // accumulator below. Deviation from the brief's literal "temporary fast listener,
-            // registered/unregistered" wording: OnGameTick already fires every tick regardless
-            // (matches the established codebase convention of reusing OnGameTick + an internal
-            // flag instead of RegisterGameTickListener lifecycle management, e.g. Part D's own
-            // documented deviation for the Thew race-gate). "Unregistered at completion" here
-            // means the midLerp flag clears and this branch becomes a no-op, not a literal
-            // listener removal.
+            // Steps the entitySize lerp via OnGameTick + midLerp flag rather than a separate
+            // temporary listener, matching this codebase's convention of reusing OnGameTick over
+            // RegisterGameTickListener lifecycle management (e.g. ThewBehavior's race-gate).
             if (midLerp) StepLerp(deltaTime);
 
             accum += deltaTime;
@@ -89,10 +69,8 @@ namespace rfmechanics
 
             if (isOrc && !active)
             {
-                // Fresh entry -- either the very first tick ever, or resuming after a
-                // race-swap-away. Classify directly from the current (unaffected-by-swap) Thew
-                // value rather than assuming Lean, so a returning orc resumes wherever their
-                // Thew actually puts them.
+                // Classifies from current Thew rather than defaulting to Lean, so a returning
+                // orc (post race-swap) resumes at the band their Thew actually puts them in.
                 var thewBhv = entity.GetBehavior<ThewBehavior>();
                 float thew = thewBhv?.Thew ?? 0f;
                 Band initial = ClassifyFresh(thew, cfg);
@@ -110,14 +88,12 @@ namespace rfmechanics
                 {
                     ClearBandStats();
                     entity.Attributes.SetBool(ActiveKey, false);
-                    // entitySize itself is deliberately left alone here -- PlayerModelLib
-                    // already resets it to 1.0 on this same race swap (T2 finding,
-                    // notes/orc-phase0-results.md), and reasserting it would fight that reset.
+                    // entitySize is left alone here: PlayerModelLib already resets it to 1.0 on
+                    // this same race swap, and reasserting it would fight that reset.
                 }
                 return;
             }
 
-            // isOrc && active: normal hysteresis evaluation on the slow tick.
             var thewBhv2 = entity.GetBehavior<ThewBehavior>();
             if (thewBhv2 == null) return;
 
@@ -131,12 +107,11 @@ namespace rfmechanics
 
             if (!midLerp)
             {
-                SelfHealEntitySize(cfg); // T2 self-heal + character-creation-UI guard
+                SelfHealEntitySize(cfg);
             }
         }
 
-        /// <summary>Root-only testing hook for /rfthew setband -- forces a band directly,
-        /// applying its stats and starting the entitySize lerp, bypassing hysteresis.</summary>
+        /// <summary>Testing hook for /rfthew setband -- forces a band directly, bypassing hysteresis.</summary>
         public void ForceBand(Band band)
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -155,14 +130,9 @@ namespace rfmechanics
             return Band.Lean;
         }
 
-        /// <summary>Phase 2 (T5): resolves to the correct band in one evaluation regardless of how
-        /// far Thew moved this tick. The old version only checked the current band's immediately
-        /// adjacent transition -- safe only while Thew moved a few thousandths per 6s tick (the
-        /// slow gain/decay/burn rates), but Frenzy (T4) can now spend Thew fast enough to cross
-        /// more than one band boundary within a single 6s sampling window (thew-audit.md Q7,
-        /// finding #1). Steps one adjacent-transition-check at a time, same single-step logic as
-        /// before, but loops until a tick produces no further transition -- at most 2 steps since
-        /// there are only 3 bands, so this is not unbounded.</summary>
+        /// <summary>Loops the single-step check up to 2 times (bounded: only 3 bands) instead of
+        /// checking one adjacent transition -- Frenzy can spend Thew fast enough to cross more
+        /// than one band boundary within a single 6s tick.</summary>
         private static Band EvaluateBand(float thew, Band current, RFMechanicsConfig cfg)
         {
             for (int i = 0; i < 2; i++)
@@ -174,10 +144,6 @@ namespace rfmechanics
             return current;
         }
 
-        /// <summary>Single-step check: does the current band transition to an immediately
-        /// adjacent one, given `thew`? Returns `current` unchanged if not. Factored out of
-        /// EvaluateBand so the multi-step loop above can repeat it without duplicating the
-        /// per-band threshold logic.</summary>
         private static Band EvaluateAdjacent(float thew, Band current, RFMechanicsConfig cfg)
         {
             switch (current)
@@ -195,10 +161,8 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>All Stats.Set writes for a band cross, once per cross -- never per-tick.
-        /// Every category is written every time (0 where a band gets no bonus) rather than
-        /// conditionally added/removed, so a fresh Set() under the same source key cleanly
-        /// replaces the previous band's value with no separate remove step needed.</summary>
+        /// <summary>Every stat category is written every call (0 = no bonus) rather than
+        /// conditionally added/removed, so a fresh Set() cleanly replaces the prior band's value.</summary>
         private void ApplyBandStats(Band b, RFMechanicsConfig cfg)
         {
             entity.Stats.Set("hungerrate", StatSource, (float)Pick(cfg.HungerRateMult, b) - 1f);
@@ -209,10 +173,8 @@ namespace rfmechanics
             entity.Stats.Set("maxhealthExtraPoints", StatSource, (float)Pick(cfg.MaxHpExtraPoints, b));
             entity.Stats.Set("rangedWeaponsAcc", StatSource, (float)Pick(cfg.RangedAccDelta, b));
 
-            // Stats.Set alone only marks WatchedAttributes dirty -- nothing re-triggers
-            // EntityBehaviorHealth.UpdateMaxHealth() off a bare stats change (confirmed by
-            // reading: its only callers are SetMaxHealthModifiers and two damage-path spots),
-            // so it must be called explicitly for the HP change to take effect immediately.
+            // Stats.Set alone doesn't retrigger EntityBehaviorHealth.UpdateMaxHealth(); must call
+            // it explicitly for the HP change to take effect immediately.
             entity.GetBehavior<EntityBehaviorHealth>()?.UpdateMaxHealth();
         }
 
@@ -253,11 +215,8 @@ namespace rfmechanics
             if (t >= 1f) midLerp = false;
         }
 
-        /// <summary>T2 self-heal: every slow tick (while not mid-lerp), if entitySize has
-        /// drifted from the current band's target -- e.g. a live race swap resetting it to 1.0
-        /// (T2, orc-phase0-results.md) or the character-creation UI overwriting it -- snap it
-        /// back directly, no lerp. Only reached while isOrc, so this never fights PML's own
-        /// swap-away reset for a non-orc character.</summary>
+        /// <summary>Snaps entitySize back to the current band's target (no lerp) if it drifts --
+        /// e.g. a live race swap or the character-creation UI resetting/overwriting it.</summary>
         private void SelfHealEntitySize(RFMechanicsConfig cfg)
         {
             float target = (float)Pick(cfg.BandSizes, CurrentBand);

@@ -26,7 +26,6 @@ namespace rfmechanics
             base.Start(api);
             staticApi = api;
 
-            // Load config — load-then-store pattern
             LoadConfig(api);
             ValidateAttunementConfig(api, config);
 
@@ -44,8 +43,7 @@ namespace rfmechanics
             api.RegisterCropBehavior("RfGoblinCropStunt", typeof(GoblinCropStuntBehavior));
             api.RegisterBlockBehaviorClass("RfGoblinSpitRepair", typeof(RfGoblinSpitRepairBehavior));
 
-            // Phase G3: GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race),
-            // no longer registered for goblins -- see its banner comment for the full story.
+            // GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race), disabled -- see its class header.
             // api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(rfmechanics.BugRace.GoblinDigModifierBehavior));
 
             // Apply Harmony patches
@@ -71,13 +69,9 @@ namespace rfmechanics
             base.Dispose();
         }
 
-        /// <summary>
-        /// Load rfmechanics.json. Missing file or successful parse are stored back
-        /// (this is what drops stale/removed keys and adds newly introduced ones,
-        /// since StoreModConfig serializes the strongly-typed config, not raw JSON).
-        /// Malformed JSON falls back to defaults in memory only, without touching
-        /// the file, so the user's broken JSON is left in place to fix.
-        /// </summary>
+        /// <summary>Missing file or successful parse are stored back (this drops stale/removed
+        /// keys and adds new ones). Malformed JSON falls back to defaults in memory only,
+        /// without touching the file, so the user's broken JSON is left in place to fix.</summary>
         private static void LoadConfig(ICoreAPI api)
         {
             RFMechanicsConfig? loaded;
@@ -101,17 +95,10 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>
-        /// Guards the invariant AttunementThresholdHysteresis's own doc comment states but
-        /// can't enforce on its own: it must exceed the largest possible single-tick
-        /// attunement delta, or threshold-crossing events can chatter (see
-        /// ElfAttunementBehavior.EvaluateThresholds). The four rate/interval fields this
-        /// depends on are explicitly "tune in play" knobs, so a retune that quietly breaks the
-        /// bound would otherwise only surface as unexplained ThresholdCrossed spam, diagnosed
-        /// much later with none of this context on hand. Warning only, not a hard failure --
-        /// mirrors this codebase's existing "malformed config still starts, just logs loudly"
-        /// posture rather than refusing to start the mod over a tuning number.
-        /// </summary>
+        /// <summary>Guards the invariant AttunementThresholdHysteresis's own doc comment states
+        /// but can't enforce on its own: it must exceed the largest possible single-tick
+        /// attunement delta, or threshold-crossing events chatter. Warning only, not a hard
+        /// failure -- retuning those rate/interval fields is expected, so this surfaces a bad retune immediately instead of as unexplained event spam later.</summary>
         private static void ValidateAttunementConfig(ICoreAPI api, RFMechanicsConfig cfg)
         {
             double maxRate = Math.Max(cfg.AttunementDecayRate, Math.Max(cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild));
@@ -180,14 +167,10 @@ namespace rfmechanics
             RegisterRotAuraDiagCommand(api);
             RegisterRotAuraDebugCommand(api);
 
-            // Server-only: ElfAttunementBehavior's tick (and therefore the underfoot check)
-            // never runs client-side, so only the server needs the resolved whitelist. Mirrors
-            // DwarfOreSongModSystem's StartClientSide-time api.World.Blocks iteration, just on
-            // the opposite side.
+            // Server-only: ElfAttunementBehavior's tick never runs client-side, so only the server needs the resolved whitelist.
             if (config != null) ElfAttunementBlockWhitelist.Resolve(api, config);
 
-            // E1.4: one logging subscriber to prove the threshold-crossing surface fires
-            // correctly (including on the way down) -- no gameplay effects exist yet.
+            // Logging subscriber only -- no gameplay effects exist yet.
             ElfAttunementBehavior.ThresholdCrossed += (entity, threshold, active, value) =>
             {
                 api.Logger.Notification("[rfmechanics] ElfAttunement threshold {0} {1} for entity {2} (value={3:F2})",
@@ -197,14 +180,9 @@ namespace rfmechanics
             RegisterAttunementDiagCommand(api);
         }
 
-        /// <summary>
-        /// E1.6: Elf attunement diagnostics -- the float, the resolved context, and (the part
-        /// that matters most when this misbehaves) which of the three GetAttunementContext
-        /// checks individually passed or failed, plus which threshold bands are currently
-        /// active. Explicitly disposable, not the HUD -- same spirit as /rfphase0/rfrotdiag.
-        /// Server-side only: ElfAttunementBehavior's live value lives in behavior memory plus
-        /// WatchedAttributes, both only meaningful against the real server entity.
-        /// </summary>
+        /// <summary>Elf attunement diagnostics: the float, the resolved context, which of the
+        /// three GetAttunementContext checks individually passed/failed, and which threshold
+        /// bands are active. Server-side only: the live value lives in behavior memory plus WatchedAttributes, both only meaningful against the real server entity.</summary>
         private void RegisterAttunementDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfattune")
@@ -225,16 +203,9 @@ namespace rfmechanics
                     if (behavior == null)
                         return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
 
-                    // Prefer the behavior's own per-tick cache (LastDiagnostics) over calling
-                    // ElfAttunementContext.GetDiagnostics fresh -- the tick already computes
-                    // this every AttunementTickInterval, so reusing it avoids a second full
-                    // evaluation (relevant once Phase 1b's census makes check 2 real). But the
-                    // cache is only trustworthy once the tick has actually been running: with
-                    // EnableElfAttunement off, or before this entity's first qualifying tick,
-                    // LastDiagnostics sits at its Unevaluated default forever -- reporting that
-                    // as if it were a real result would show "context=None, every check false"
-                    // regardless of the player's actual position, which is actively misleading
-                    // for exactly the situations someone reaches for this command to debug.
+                    // Prefers the behavior's own per-tick cache over a fresh GetDiagnostics call, but only when
+                    // IsElfCached confirms the tick has actually run -- otherwise LastDiagnostics sits at its
+                    // Unevaluated default, and reporting that as real would misleadingly show "context=None, every check false".
                     string diagSource;
                     AttunementDiagnostics diag;
                     if (cfg.EnableElfAttunement && behavior.IsElfCached)
@@ -266,14 +237,8 @@ namespace rfmechanics
                 });
         }
 
-        /// <summary>
-        /// Phase G3 rot aura diagnostics: raw dietsetup rot-intake, elapsed hours since last
-        /// dietsetup write, the live decayed value, and the resulting radius/intensity --
-        /// enough to confirm the intake-&gt;shape mapping (Task 4) behaves as designed without
-        /// eating rotten food and waiting to see the aura visibly change. Server-side only, same
-        /// reasoning as /rfdiag/dwarfdepth/rfthew: reads entity.WatchedAttributes directly
-        /// against the real entity.
-        /// </summary>
+        /// <summary>Rot aura diagnostics: raw dietsetup rot-intake, elapsed hours since last
+        /// dietsetup write, the live decayed value, and the resulting radius/intensity -- confirms the intake-&gt;shape mapping without eating rotten food and waiting to see it change.</summary>
         private void RegisterRotAuraDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfrotdiag")
@@ -307,18 +272,11 @@ namespace rfmechanics
                 });
         }
 
-        /// <summary>
-        /// Testing tools for the rot aura, root-privileged like /rfphase0/rfthew's own
-        /// force-set subcommands. Neither subcommand touches rot-aura game logic itself --
-        /// "registry" just reads GoblinRotAuraRegistry's live state, "timescale" is a thin
-        /// wrapper over vanilla's own IGameCalendar.CalendarSpeedMul (default 0.5, i.e. ~48
-        /// real minutes/in-game day) -- both Task 3 (crop growth, gated on
-        /// BlockEntityFarmland's own world.Calendar.TotalHours-driven interval) and Task 4
-        /// (rot-intake decay, also TotalHours-driven) are otherwise real-time-slow to observe.
-        /// Task 2 (spoilage acceleration) is NOT calendar-gated -- GoblinRotAuraBaseDeltaHoursPerSweep
-        /// is injected on the real-seconds sweep throttle regardless of calendar speed, so it
-        /// doesn't need this dial to test quickly.
-        /// </summary>
+        /// <summary>Testing tools for the rot aura. Neither subcommand touches rot-aura game
+        /// logic: "registry" reads GoblinRotAuraRegistry's live state; "timescale" wraps vanilla's
+        /// IGameCalendar.CalendarSpeedMul so the calendar-hour-driven crop-growth and rot-intake-
+        /// decay checks (otherwise real-time-slow) can be observed quickly. Spoilage acceleration
+        /// itself is NOT calendar-gated (runs on the real-seconds sweep throttle), so it doesn't need this dial.</summary>
         private void RegisterRotAuraDebugCommand(ICoreServerAPI api)
         {
             CommandArgumentParsers parsers = api.ChatCommands.Parsers;
@@ -365,14 +323,9 @@ namespace rfmechanics
             base.StartClientSide(api);
         }
 
-        /// <summary>
-        /// Registered server-side only (see StartServerSide). EntityBehaviorHunger and
-        /// entity.Attributes (rf-climbseconds/rf-climbflush) are server-authoritative and
-        /// not synced to the client, so reading them from a client-side command registration
-        /// silently returns null/default — these commands must run against the real entity.
-        /// Use "/dwarfdepth" / "/rfdiag" (not the "." shortcut, which prefers local
-        /// client-side handling when a command is registered on both sides).
-        /// </summary>
+        /// <summary>Registered server-side only: EntityBehaviorHunger and entity.Attributes
+        /// (rf-climbseconds/rf-climbflush) are server-authoritative, not synced to the client, so
+        /// reading them from a client-side registration would silently return null/default.</summary>
         private void RegisterDwarfDepthCommand(ICoreAPI api)
         {
             api.ChatCommands.Create("dwarfdepth")
@@ -387,11 +340,9 @@ namespace rfmechanics
                     int y = (int)player.Entity.Pos.Y;
                     int seaLevel = api.World.SeaLevel;
 
-                    // Check class
                     string charClass = player.Entity.WatchedAttributes.GetString("characterClass");
                     bool hasClass = charClass != null;
 
-                    // Check trait
                     bool hasTrait = false;
                     if (hasClass)
                     {
@@ -448,18 +399,9 @@ namespace rfmechanics
                 });
         }
 
-        /// <summary>
-        /// Per-source breakdown for a single blended stat category, e.g. "miningSpeedMul: base=1.00 trait=0.15, blended=1.15".
-        /// EntityStats' indexer throws if the category was never registered/set, so this
-        /// is defensive even though the stat categories used here are registered on
-        /// EntityPlayer at construction.
-        /// A literal "->" here previously broke in-game chat rendering: the client's chat
-        /// window parses message text as rich text (font tags etc.), and a bare "&gt;"
-        /// character desyncs its tag parser (confirmed via client-main.log: "Found closing
-        /// tag char &gt; but no tag was opened"), so the whole /rfdiag message silently
-        /// failed to display even though it was written to client-chat.log correctly. Avoid
-        /// any bare "&lt;"/"&gt;" in chat-command output for this reason.
-        /// </summary>
+        /// <summary>LANDMINE: a bare "&gt;" in chat-command output desyncs the client's rich-text
+        /// tag parser, silently failing to display the whole message even though it's written to
+        /// client-chat.log correctly -- avoid any bare "&lt;"/"&gt;" here (e.g. no literal "-&gt;").</summary>
         private static string FormatStatBreakdown(IPlayer player, string category)
         {
             try
@@ -477,17 +419,11 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>
-        /// Workaround for a race/model-swap bug external to rfmechanics: whatever
-        /// performs a live model swap (e.g. PlayerModelLib) updates characterClass
-        /// and extraTraits but never re-invokes CharacterSystem.applyTraitAttributes,
-        /// so old trait-sourced Stats entries (walkspeed, hungerrate, etc.) are left
-        /// stuck at their previous race's values. setCharacterClass(..., initializeGear:
-        /// false) re-runs that recompute (it clears all "trait"-sourced Stats entries,
-        /// then reapplies from the CURRENT class + extraTraits) without touching gear.
-        /// Registered server-side only — mutating WatchedAttributes/Stats from the
-        /// client alone would not persist past the next server sync.
-        /// </summary>
+        /// <summary>Workaround for a race/model-swap bug external to rfmechanics: whatever
+        /// performs a live model swap (e.g. PlayerModelLib) updates characterClass/extraTraits
+        /// but never re-invokes CharacterSystem.applyTraitAttributes, leaving old trait-sourced
+        /// Stats entries stuck at the previous race's values. setCharacterClass(...,
+        /// initializeGear: false) re-runs that recompute without touching gear.</summary>
         private void RegisterStatsFixCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfstatsfix")
@@ -512,17 +448,10 @@ namespace rfmechanics
                 });
         }
 
-        /// <summary>
-        /// Orc Thew diagnostics -- current value plus a named per-condition readout (gorged/
-        /// proteinGated/lowSaturation) so gain/decay tuning can be debugged without guessing
-        /// which of the three gain conditions is failing. Root-privileged like /rfstatsfix's
-        /// sibling admin tools, since "set" lets Thew be forced to an arbitrary value for
-        /// testing. Registered server-side only, same reasoning as /rfdiag/dwarfdepth: Thew
-        /// lives in entity.Attributes (non-synced), unreadable from a client-side registration.
-        ///
-        /// Message formatting avoids bare '&lt;'/'&gt;' characters -- see FormatStatBreakdown's
-        /// comment above; the same chat-rendering landmine applies here.
-        /// </summary>
+        /// <summary>Orc Thew diagnostics: current value plus a named per-condition readout so
+        /// gain/decay tuning can be debugged without guessing which condition is failing.
+        /// Root-privileged since "set" force-sets Thew for testing. Message formatting avoids
+        /// bare '&lt;'/'&gt;' -- see FormatStatBreakdown's chat-rendering landmine.</summary>
         private void RegisterThewCommand(ICoreServerAPI api)
         {
             CommandArgumentParsers parsers = api.ChatCommands.Parsers;
@@ -671,16 +600,11 @@ namespace rfmechanics
                 .EndSubCommand();
         }
 
-        // PML entitySize helpers — shared, load-bearing production code.
-        // Originally written for the PHASE0-DIAG throwaway diagnostics below, but BandBehavior
-        // (Phase 3) now depends on these too for real band-size writes, so they are no longer
-        // safe to delete alongside a PHASE0-DIAG cleanup pass. Kept `internal` (not private) so
-        // BandBehavior.cs can call them directly instead of duplicating the reflection lookup.
+        // LOAD-BEARING: originally written for the PHASE0-DIAG diagnostics below, but
+        // BandBehavior now depends on these too for real band-size writes -- not safe to delete
+        // alongside a PHASE0-DIAG cleanup pass. Kept `internal` so BandBehavior.cs can call them directly.
 
-        // PlayerModelLib.PlayerSkinBehavior.PropertyName() — confirmed via decompile
-        // (reference/decompiled/PlayerModelLib/PlayerModelLib/PlayerSkinBehavior.cs:306-309).
-        // Looked up via Entity.GetBehavior(string) + reflection so rfmechanics does not need a
-        // compile-time reference to PlayerModelLib.dll.
+        // Looked up via Entity.GetBehavior(string) + reflection so rfmechanics does not need a compile-time reference to PlayerModelLib.dll.
         internal const string PmlSkinBehaviorPropertyName = "skinnableplayercustommodel";
 
         internal static EntityBehavior? GetPmlSkinBehavior(Entity entity)
@@ -699,10 +623,7 @@ namespace rfmechanics
             return value is float f ? f.ToString("F3") : "(CurrentSize unavailable)";
         }
 
-        // Mirrors CustomModelsSystem.HandleChangePlayerModelSizePacket exactly
-        // (reference/decompiled/PlayerModelLib/PlayerModelLib/CustomModelsSystem.cs:1063-1067):
-        // WatchedAttributes.SetFloat("entitySize", ...) followed by an explicit
-        // UpdateEntityProperties() call, never touching PML's client packet path.
+        // Mirrors CustomModelsSystem.HandleChangePlayerModelSizePacket exactly: SetFloat("entitySize", ...) followed by an explicit UpdateEntityProperties() call, never touching PML's client packet path.
         internal static bool TryUpdatePmlEntityProperties(Entity entity, out string message)
         {
             EntityBehavior? behavior = GetPmlSkinBehavior(entity);
@@ -724,11 +645,9 @@ namespace rfmechanics
             return true;
         }
 
-        // PHASE0-DIAG — remove before release.
-        // Verification tooling for notes/orc-phase0-results.md. No gameplay behavior — read/write
-        // of diagnostic-only state (rf-p0-marker) plus a direct mirror of PlayerModelLib's own
-        // HandleChangePlayerModelSizePacket write pattern for entitySize. Registered server-side
-        // only, root privilege, matching the existing /rfstatsfix convention.
+        // PHASE0-DIAG -- remove before release. No gameplay behavior: read/write of
+        // diagnostic-only state (rf-p0-marker) plus a direct mirror of PlayerModelLib's own
+        // entitySize write pattern.
 
         private const string P0MarkerKey = "rf-p0-marker";
 

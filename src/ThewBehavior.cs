@@ -8,29 +8,17 @@ namespace rfmechanics
 {
     /// <summary>
     /// Server-authoritative, hidden Thew float (0..1) for orc players, stored in
-    /// entity.Attributes (non-synced -- see notes/orc-diagnostic-findings.md §5) so it never
-    /// reaches the client HUD. A slow shadow of saturation: climbs at a rate graded by how full
-    /// (ThewRampFloor..ThewRampCeiling) the player is, while protein-gated; falls while
-    /// saturation is low (starvation) or, unconditionally, while the current band is Bulky
-    /// (war-form upkeep); otherwise holds. A separate eat-pulse patch (ThewEatPulsePatch.cs)
-    /// adds a small flat grant on qualifying bites, cooldown-gated.
-    ///
-    /// Attached to every player entity via a JSON patch (seraph-thew.json), same convention as
-    /// RFTreeProximityBehavior -- the orc-race gate lives inside OnGameTick
-    /// (IsOrc()), not in listener registration/lifecycle. This means a live race swap needs no
-    /// special-casing: swapping into orc starts passing the gate on the next tick, swapping out
-    /// simply stops updating Thew (the stored value sits dormant, unread by anything else),
-    /// for free -- matching the T2 phase0 finding that no other rfmechanics stat-output survives
-    /// a race swap without an explicit recompute, but Thew has no output to leave stale.
+    /// entity.Attributes (non-synced) so it never reaches the client HUD. Climbs while well-fed
+    /// and protein-gated, falls while starving or (unconditionally) while Bulky, otherwise holds.
+    /// Orc-race gate lives inside OnGameTick (IsOrc()), not listener lifecycle, so a live race
+    /// swap needs no special-casing -- swapping out just stops updating Thew; the stored value
+    /// sits dormant since nothing else reads it.
     /// </summary>
     public class ThewBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-orc-thew";
 
-        /// <summary>Phase 2 (T1): last EnumFoodCategory an orc ate, written unconditionally by
-        /// ThewEatPulsePatch on every qualifying eat event (regardless of whether that event's
-        /// own pulse-gate conditions pass), read here to gate the hourly tick gain. Public so
-        /// ThewEatPulsePatch can write it without duplicating the attribute key.</summary>
+        /// <summary>Written by ThewEatPulsePatch on every qualifying eat, read here to gate the hourly tick gain -- public so both sides share one attribute key.</summary>
         public const string LastFoodCategoryKey = "rf-orc-last-food-category";
 
         private float accum;
@@ -79,51 +67,33 @@ namespace rfmechanics
             }
             else
             {
-                // T2: no neutral parking zone anywhere, above or below the ramp floor -- gain not
-                // firing always means decay firing, at one of two rate families. Below the floor,
-                // the existing three-tier Underfed/Hungry/Starving decay (see
-                // RFMechanicsConfig.ThewDecayUnderfedPerHour's doc comment). At/above the floor
-                // (well-fed but not protein-gated, or blocked by EnableThewFoodTypeGate), the new
-                // ThewDecaySatedNonProteinPerHour tier -- this also resolves the audit's knife-edge
-                // finding (satFrac == ThewRampFloor exactly used to fall through both branches;
-                // now it lands in this else and satFrac < floor is false, so it correctly takes
-                // the sated-tier rate).
+                // No neutral parking zone: gain not firing always means decay firing. satFrac ==
+                // ThewRampFloor exactly lands here (not the gain branch), taking the sated-tier rate.
                 float decayPerHour = satFrac < (float)cfg.ThewRampFloor
                     ? DecayTierPerHour(hunger, satFrac, cfg)
                     : (float)cfg.ThewDecaySatedNonProteinPerHour;
                 Thew -= decayPerHour * hourFraction;
             }
 
-            // Bulky-only flat bleed, independent of gorge/starvation state above -- stacks with
-            // either. This is the lever that stops Bulky being sustainable purely by not
-            // starving; see RFMechanicsConfig.BulkyHoldDecayPerHour's doc comment.
+            // Stacks with the gain/decay above -- the lever that stops Bulky being sustainable purely by not starving.
             if (band == BandBehavior.Band.Bulky)
             {
                 Thew -= (float)cfg.BulkyHoldDecayPerHour * hourFraction;
             }
         }
 
-        /// <summary>
-        /// Vanilla MaxSaturation before any multiplier -- player.json:4018, confirmed T1
-        /// (orc-phase0-results.md). Used as the common baseline both stacking-mode candidates
-        /// are computed from, rather than trying to reverse-engineer it out of a live
-        /// MaxSaturation value that may already reflect racialability's own contribution.
-        /// </summary>
+        /// <summary>Vanilla MaxSaturation before any multiplier (player.json); both stacking-mode
+        /// candidates are computed from this baseline rather than reverse-engineered out of a
+        /// live MaxSaturation value that may already reflect racialability's own contribution.</summary>
         private const float VanillaBaseMaxSaturation = 1500f;
 
         /// <summary>
-        /// Continuously-reasserted MaxSaturation target for orc's bigger stomach, combined with
-        /// racialability's own "maxSaturationFactor" blended stat (e.g. the bottomless-stomach
-        /// ability) per StomachStackingMode. Reworked from a one-time idempotent-flag multiply/
-        /// divide (the original design) to a per-tick recompute-and-set, because "max" stacking
-        /// needs to compare two candidates freshly every tick, not multiply/divide relative to
-        /// whatever the value currently is -- that would still compound with PlayerModelLib's own
-        /// reactive rescale-on-change postfix (StatsPatches.ApplyMaxSaturationStats), which fires
-        /// on every MaxSaturation read and rescales relative to its own last-seen factor marker.
-        /// Reading entity.Stats.GetBlended("maxSaturationFactor") directly sidesteps that
-        /// entirely -- it's the actual source stat racialability writes to, not a value derived
-        /// from an already-modified MaxSaturation. Runs every tick regardless of isOrc so a
-        /// non-orc player's racialability-only contribution (if any) is still asserted correctly.
+        /// Recomputes and re-asserts MaxSaturation every tick rather than a one-time multiply/
+        /// divide, because "max" stacking mode needs to compare two fresh candidates each tick --
+        /// multiplying/dividing the current value would still compound with PlayerModelLib's own
+        /// reactive rescale-on-change postfix. Reads entity.Stats.GetBlended("maxSaturationFactor")
+        /// directly (the actual source stat racialability writes) rather than an already-modified
+        /// MaxSaturation. Runs regardless of isOrc so a non-orc's racialability contribution still applies.
         /// </summary>
         private void ApplyStomachMultiplier(RFMechanicsConfig cfg, bool isOrc)
         {
@@ -152,12 +122,7 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>
-        /// Thew death penalty ("the body burned everything to heal"). Entity.Die does not wipe
-        /// entity.Attributes (notes/orc-diagnostic-findings.md §4, confirmed in-game by T1), so
-        /// this fires exactly once per death and the reduced Thew value persists through respawn
-        /// normally via the same mechanism.
-        /// </summary>
+        /// <summary>Entity.Die does not wipe entity.Attributes, so this fires once per death and the reduced Thew value persists through respawn.</summary>
         public override void OnEntityDeath(DamageSource damageSourceForDeath)
         {
             if (entity.World.Side != EnumAppSide.Server) return;
@@ -169,12 +134,7 @@ namespace rfmechanics
             Thew -= (float)cfg.ThewDeathPenalty;
         }
 
-        /// <summary>
-        /// Guard chain matching every other rfmechanics race gate (see
-        /// RFTreeProximityBehavior.IsElf): EntityPlayer check, then characterClass null check
-        /// (load-bearing -- HasTrait returns true for a null class by default, so classless
-        /// entities must be explicitly excluded), then the trait check itself.
-        /// </summary>
+        // charClass null-check is load-bearing: HasTrait returns true for a null class by default, so classless entities must be explicitly excluded.
         private bool IsOrc()
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -193,46 +153,29 @@ namespace rfmechanics
             return charSys.HasTrait(iplayer, cfg.OrcTraitCode);
         }
 
-        /// <summary>Phase 2 (T1): true for the three EnumFoodCategory values the design brief
-        /// names as contributing no Thew regardless of satiety -- Fruit, Vegetable, Grain.
-        /// Protein and Dairy (and Unknown/NoNutrition, e.g. never having eaten) are NOT blocked
-        /// here; they pass through to the existing protein gate (see IsProteinGated) unchanged.
-        /// Public static so ThewEatPulsePatch uses the exact same classification as the tick
-        /// gain.</summary>
+        /// <summary>Public static so ThewEatPulsePatch uses the exact same classification as the tick gain.</summary>
         public static bool IsNonProteinPlantCategory(EnumFoodCategory foodCat) =>
             foodCat == EnumFoodCategory.Fruit || foodCat == EnumFoodCategory.Vegetable || foodCat == EnumFoodCategory.Grain;
 
-        /// <summary>Phase 2 fix (post-report review): widened from a single ProteinLevel check to
-        /// a category SET (Protein OR Dairy), matching IsNonProteinPlantCategory's own set-based
-        /// shape. EnumFoodCategory.Protein and .Dairy are genuinely different vanilla categories
-        /// -- cheese.json tags "Dairy", never "Protein" (confirmed against installed assets), so
-        /// gating gain purely on ProteinLevel silently excluded cheese-only sustenance even though
-        /// it's a real orc-plausible protein-adjacent diet. Eggs and insects do NOT need this
-        /// widening and were verified, not assumed: egg.json and insect.json both already tag
-        /// "Protein" in vanilla assets, so they already raised ProteinLevel and passed the
-        /// original single-category gate correctly. Reuses ProteinGateLevel as the threshold for
-        /// both levels rather than adding a second config number -- untested whether Dairy's
-        /// per-bite nutrition rate matches meat's closely enough for the same threshold to feel
-        /// right; flagged for review if cheese-heavy diets end up gating too early/late in
-        /// practice.</summary>
+        /// <summary>Checks Protein OR Dairy, not just Protein -- vanilla's cheese.json tags
+        /// "Dairy", never "Protein", so a Protein-only gate silently excluded cheese-only diets
+        /// (egg.json/insect.json already tag "Protein" and don't need this). Reuses
+        /// ProteinGateLevel as the threshold for both rather than adding a second config number;
+        /// untested whether Dairy's per-bite rate matches meat's closely enough for that to feel right.</summary>
         public static bool IsProteinGated(EntityBehaviorHunger hunger, RFMechanicsConfig cfg)
         {
             float threshold = (float)cfg.ProteinGateLevel;
             return hunger.ProteinLevel > threshold || hunger.DairyLevel > threshold;
         }
 
-        /// <summary>Reads the last-eaten food category recorded by ThewEatPulsePatch and
-        /// classifies it. Defaults to NoNutrition (never eaten, or not orc-tracked yet) which is
-        /// never a blocking category, so a fresh spawn isn't gated by a value it never wrote.</summary>
+        /// <summary>Defaults to NoNutrition, which is never a blocking category, so a fresh spawn isn't gated by a value it never wrote.</summary>
         private bool LastFoodBlocksGain()
         {
             int raw = entity.Attributes.GetInt(LastFoodCategoryKey, (int)EnumFoodCategory.NoNutrition);
             return IsNonProteinPlantCategory((EnumFoodCategory)raw);
         }
 
-        /// <summary>Linear ramp: 0 at/below ThewRampFloor, 1 at/above ThewRampCeiling. Public
-        /// static so ThewEatPulsePatch's bite gate uses the exact same curve as the tick gain,
-        /// rather than a separately-maintained copy.</summary>
+        /// <summary>Public static so ThewEatPulsePatch's bite gate uses the exact same curve as the tick gain.</summary>
         public static float RampMultiplier(float satFrac, RFMechanicsConfig cfg)
         {
             float floor = (float)cfg.ThewRampFloor;
@@ -241,11 +184,7 @@ namespace rfmechanics
             return GameMath.Clamp((satFrac - floor) / (ceiling - floor), 0f, 1f);
         }
 
-        /// <summary>Which of the three decay tiers applies below ThewRampFloor. Starving is keyed
-        /// off Saturation itself (not satFrac) to match vanilla's own `Saturation &lt;= 0f`
-        /// starvation-damage trigger exactly (EntityBehaviorHunger.SlowTick) rather than a
-        /// fraction that could theoretically read as zero from rounding at a nonzero
-        /// Saturation.</summary>
+        /// <summary>Starving is keyed off Saturation itself, not satFrac, to match vanilla's own `Saturation &lt;= 0f` starvation-damage trigger exactly.</summary>
         public static string DecayTierName(EntityBehaviorHunger hunger, float satFrac, RFMechanicsConfig cfg)
         {
             if (hunger.Saturation <= 0f) return "Starving";

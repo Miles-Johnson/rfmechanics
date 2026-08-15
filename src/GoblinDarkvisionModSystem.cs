@@ -7,22 +7,14 @@ namespace rfmechanics
 {
     /// <summary>
     /// Constant, no-drawback darkvision for goblins. Client-side only, no server component --
-    /// characterClass/extraTraits are WatchedAttributes, synced to the owning client, so
-    /// CharacterSystem.HasTrait works from here without any round-trip.
-    ///
-    /// Composes with vanilla's own ModSystemNightVision (night-vision goggles) instead of
-    /// racing it. Both write ICoreClientAPI.Render.ShaderUniforms.NightVisionStrength every
-    /// frame -- confirmed the only other writer in the installed 1.21.5 binary
-    /// (VSSurvivalMod/ModSystemNightVision.cs:74-91) -- and the field itself is a plain public
-    /// float with no clamp/blend/accumulation logic downstream
-    /// (VintagestoryAPI/DefaultShaderUniforms.cs:30). Two unconditional writers would be a
-    /// last-writer-wins race (a non-goblin's goggles could get zeroed by our own "not a goblin"
-    /// branch, or vice versa), so this renderer never writes 0f itself -- it only raises the
-    /// uniform via Math.Max when the trait check passes, and leaves it alone otherwise. RenderOrder
-    /// 0.1 (vanilla's ModSystemNightVision is 0.0, and IRenderer.RenderOrder's own doc confirms
-    /// "0 = drawn first, 1 = drawn last") guarantees this renderer's OnRenderFrame runs after
-    /// vanilla's within the "Before" stage, so the max-compose is the authoritative final write
-    /// for the frame regardless of goggle state.
+    /// characterClass/extraTraits are WatchedAttributes synced to the owning client, so
+    /// CharacterSystem.HasTrait works here without a round-trip.
+    /// Composes with vanilla's ModSystemNightVision by Math.Max on
+    /// ShaderUniforms.NightVisionStrength rather than racing it -- this renderer never writes
+    /// 0f itself, only raises the uniform when the trait check passes, since two unconditional
+    /// writers would be a last-writer-wins race (goggles zeroed by our "not a goblin" branch or
+    /// vice versa). RenderOrder 0.1 (vanilla is 0.0, lower draws first) guarantees this runs
+    /// after vanilla within the "Before" stage, so the max-compose is the frame's final write.
     /// </summary>
     public class GoblinDarkvisionModSystem : ModSystem, IRenderer
     {
@@ -55,9 +47,7 @@ namespace rfmechanics
                 if (player?.Entity == null)
                     return;
 
-                // Class guard: no class = not a goblin (overrides HasTrait's
-                // null-class-returns-true default). Same guard shape as every other
-                // rfmechanics race gate (FallDamagePatch, TreeClimbingPatch).
+                // No class = not a goblin; overrides HasTrait's null-class-returns-true default.
                 string charClass = player.Entity.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass))
                     return;
@@ -79,7 +69,6 @@ namespace rfmechanics
                     loggedException = true;
                     capi.Logger?.Warning("[rfmechanics] Exception in GoblinDarkvisionModSystem: {0}", ex);
                 }
-                // Leave the uniform unchanged on exception.
             }
         }
 

@@ -9,17 +9,11 @@ namespace rfmechanics
     /// <summary>
     /// Postfix on CollectibleObject.tryEatStop -- grants spit charges when a goblin finishes
     /// eating game:rot. Deliberately not folded into GoblinRotEdiblePatch: that class patches
-    /// GetNutritionProperties, which only makes rot look edible to goblins and carries no
-    /// eat-completion signal or itemstack-independent trigger. tryEatStop is patched instead
-    /// because it has direct access to slot.Itemstack (needed to confirm the eaten item is
-    /// literally game:rot, not just "some NoNutrition-category food") and already gates the
-    /// real eat completion the same way this patch mirrors: secondsUsed &gt;= 0.95f.
-    ///
-    /// tryEatStop is protected, so the HarmonyPatch attribute below uses the string method name
-    /// rather than nameof(...), which cannot reference an inaccessible member from outside the
-    /// class. There is only one tryEatStop overload on CollectibleObject (confirmed by reading
-    /// reference/upstream/vsapi/Common/Collectible/Collectible.cs), so the string name is
-    /// unambiguous.
+    /// GetNutritionProperties, which only makes rot look edible and carries no eat-completion
+    /// signal. tryEatStop has direct access to slot.Itemstack (to confirm the eaten item is
+    /// literally game:rot) and already gates real eat completion the same way this mirrors.
+    /// tryEatStop is protected, so the attribute below uses the string method name -- nameof(...)
+    /// cannot reference an inaccessible member; there is only one overload, so it's unambiguous.
     /// </summary>
     [HarmonyPatch(typeof(CollectibleObject), "tryEatStop")]
     public static class GoblinSpitChargeGrantPatch
@@ -38,8 +32,7 @@ namespace rfmechanics
                 var cfg = RFMechanicsModSystem.Config;
                 if (cfg == null || !cfg.EnableGoblinSpitCharges) return;
 
-                // Mirrors tryEatStop's own completion gate (Collectible.cs:1856) -- a cancelled
-                // bite (released early) should not grant a charge.
+                // Mirrors tryEatStop's own completion gate -- a cancelled bite shouldn't grant a charge.
                 if (secondsUsed < 0.95f) return;
 
                 var code = slot?.Itemstack?.Collectible?.Code;
@@ -47,9 +40,7 @@ namespace rfmechanics
 
                 if (byEntity is not EntityPlayer player) return;
 
-                // Load-bearing null check -- HasTrait returns true for a null class, so skipping
-                // this makes every unassigned player match. Same pattern as GoblinRotEdiblePatch
-                // and GoblinSpitPackingPatch.
+                // Load-bearing: HasTrait returns true for a null class, so skipping this makes every unassigned player match.
                 string charClass = player.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass)) return;
 

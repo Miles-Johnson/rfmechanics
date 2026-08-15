@@ -8,22 +8,11 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Harmony prefix on EntityBehaviorHunger.OnGameTick.
-    /// Accumulates climb time while a dwarf ascends (IsClimbing && Jump)
-    /// and drains it as flat satiety in a 10-second batch, writing Saturation
-    /// directly.
-    /// 
-    /// Direct write skips the nutrient drain and UpdateNutrientHealthBoost
-    /// that ConsumeSaturation/ReduceSaturation incur — climbing costs hunger,
-    /// not max health. Vanilla owns starvation.
-    /// 
-    /// No reflection, no AccessTools, no FieldRefAccess.
-    /// State stored in entity.Attributes (non-synced, per-entity tree).
-    /// 
-    /// Only the EntityPlayer guard sits outside the try block. Every other
-    /// statement lives inside the try — this patch runs on the tick path
-    /// where the player-entity link is always established, but the guard
-    /// section is treated as hostile for consistency with ClimbSpeedPatch.
+    /// Harmony prefix on EntityBehaviorHunger.OnGameTick. Accumulates climb time while a dwarf
+    /// ascends (IsClimbing &amp;&amp; Jump) and drains it as flat satiety in a batch, writing
+    /// Saturation directly -- this skips the nutrient drain and UpdateNutrientHealthBoost that
+    /// ConsumeSaturation/ReduceSaturation incur, since climbing costs hunger, not max health
+    /// (vanilla still owns starvation). State lives in entity.Attributes (non-synced, per-entity).
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorHunger), nameof(EntityBehaviorHunger.OnGameTick))]
     public static class ClimbSaturationPatch
@@ -36,13 +25,11 @@ namespace rfmechanics
         [HarmonyPrefix]
         public static void Prefix(EntityBehaviorHunger __instance, float deltaTime)
         {
-            // ── Guard 1: EntityPlayer only (literal first statement, outside try) ──
             if (__instance.entity is not EntityPlayer player)
                 return;
 
             try
             {
-                // 2. Server side only
                 if (__instance.entity.World.Side != EnumAppSide.Server)
                     return;
 
@@ -50,13 +37,11 @@ namespace rfmechanics
                 if (cfg == null)
                     return;
 
-                // 3. Master toggle
                 if (!cfg.EnableClimbSaturation)
                     return;
 
-                // 4. Game mode: not Creative or Spectator
-                //    (vanilla returns early in these modes before the batch runs,
-                //     so accumulating would bank a large drain on mode change)
+                // Vanilla returns early in Creative/Spectator before the batch runs, so
+                // accumulating here would bank a large drain on mode change.
                 IPlayer iplayer = __instance.entity.World.PlayerByUid(player.PlayerUID);
                 if (iplayer == null)
                     return;
@@ -65,17 +50,15 @@ namespace rfmechanics
                 if (mode == EnumGameMode.Creative || mode == EnumGameMode.Spectator)
                     return;
 
-                // ── Accumulate climb time (dwarf-only) ──
                 bool ascending = player.Controls.IsClimbing && player.Controls.Jump;
                 if (ascending)
                 {
-                    // Re-check IPlayer.Entity (may be null during construction)
+                    // iplayer.Entity may still be null during construction.
                     if (iplayer.Entity == null)
                         return;
 
-                    // Load-bearing: characterClass null check prevents HasTrait's
-                    // null-class-returns-true default from charging classless
-                    // players as dwarves. Same pattern as ClimbSpeedPatch.
+                    // Load-bearing: null check prevents HasTrait's null-class-returns-true
+                    // default from charging classless players as dwarves.
                     string charClass = iplayer.Entity.WatchedAttributes.GetString("characterClass");
                     if (string.IsNullOrEmpty(charClass))
                         return;
@@ -87,13 +70,12 @@ namespace rfmechanics
                     if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
                         return;
 
-                    // Dwarf confirmed — accumulate
                     float seconds = __instance.entity.Attributes.GetFloat(KeyClimbSeconds);
                     seconds += deltaTime;
                     __instance.entity.Attributes.SetFloat(KeyClimbSeconds, seconds);
                 }
 
-                // ── Flush timer (accumulates every tick regardless) ──
+                // Flush timer accumulates every tick regardless of whether the player is ascending.
                 float flush = __instance.entity.Attributes.GetFloat(KeyFlushTimer) + deltaTime;
                 __instance.entity.Attributes.SetFloat(KeyFlushTimer, flush);
 
@@ -107,7 +89,6 @@ namespace rfmechanics
 
                     __instance.entity.Attributes.SetFloat(KeyClimbSeconds, 0f);
 
-                    // Calendar scale: SpeedOfTime * CalendarSpeedMul / 30f
                     float cal = __instance.entity.Api.World.Calendar.SpeedOfTime
                               * __instance.entity.Api.World.Calendar.CalendarSpeedMul / 30f;
 
@@ -116,8 +97,6 @@ namespace rfmechanics
                                 * __instance.entity.Stats.GetBlended("hungerrate")
                                 * cal;
 
-                    // Direct write skips nutrient drain and UpdateNutrientHealthBoost —
-                    // climbing costs hunger, not max health.
                     __instance.Saturation = Math.Max(0f, __instance.Saturation - drain);
                 }
             }
@@ -129,7 +108,6 @@ namespace rfmechanics
                     RFMechanicsModSystem.Api?.Logger?.Error(
                         "[rfmechanics] Exception in ClimbSaturationPatch: {0}", ex);
                 }
-                // Saturation unchanged on exception
             }
         }
     }

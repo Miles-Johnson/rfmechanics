@@ -6,29 +6,19 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Harmony postfix on CollectibleObject.GetMiningSpeed.
-    /// Applies the depth/altitude mining speed curve for dwarf players, and (2026-08-06,
-    /// Phase G2) a flat stone-mining slowdown for goblin players -- both live in one postfix,
-    /// sequential trait checks, same coexistence shape as FallDamagePatch's Elf/Goblin fall
-    /// damage reduction ("a player is only ever one race, so no double-application risk").
-    ///
-    /// NOTE: GetMiningSpeed is virtual. Any modded tool that overrides it
-    /// without calling base.GetMiningSpeed will silently bypass this patch.
-    /// No vanilla subclass overrides this method (verified against 1.21.5 decompile).
-    ///
-    /// NOTE: GetMiningSpeed's vanilla body already reads Stats.GetBlended("miningSpeedMul")
-    /// before this postfix runs, so any other writer of that blended stat composes
-    /// multiplicatively with this patch's dwarf bonus — both apply, no conflict.
+    /// Harmony postfix on CollectibleObject.GetMiningSpeed. Applies the depth/altitude mining
+    /// speed curve for dwarf players and a flat stone-mining slowdown for goblins in one
+    /// postfix, sequential trait checks (a player is only ever one race, no double-application risk).
+    /// LANDMINE: GetMiningSpeed is virtual -- a modded tool overriding it without calling
+    /// base.GetMiningSpeed silently bypasses this patch (no vanilla subclass does).
+    /// Vanilla's body already reads Stats.GetBlended("miningSpeedMul") before this postfix
+    /// runs, so any other writer of that stat composes multiplicatively -- no conflict.
     /// </summary>
     [HarmonyPatch(typeof(CollectibleObject), nameof(CollectibleObject.GetMiningSpeed))]
     public static class MiningSpeedPatch
     {
         private static bool loggedException = false;
 
-        // HarmonyPostfix: __result is the return value from the original method.
-        // We multiply it by (1 + bonus) for dwarf players mining Ore or Stone, and/or by
-        // GoblinStoneMiningFactor for goblin players (same material gate, mutually exclusive
-        // since a player is only ever one race).
         [HarmonyPostfix]
         public static void Postfix(
             ref float __result,
@@ -37,9 +27,6 @@ namespace rfmechanics
             Block block,
             IPlayer forPlayer)
         {
-            // ── Early exits (ordered by cost) ──
-
-            // 1. Null player guard
             if (forPlayer?.Entity == null)
                 return;
 
@@ -47,8 +34,7 @@ namespace rfmechanics
             if (cfg == null)
                 return;
 
-            // 3. Material gate: mirror vanilla's Ore/Stone check at CollectibleObject.cs:621-624
-            //    Only apply either race's stone-mining modifier to Ore and Stone blocks.
+            // Mirrors vanilla's own Ore/Stone check -- only apply either race's modifier to those materials.
             if (blockSel?.Position == null || block == null)
                 return;
 
@@ -57,7 +43,7 @@ namespace rfmechanics
             if (material != EnumBlockMaterial.Ore && material != EnumBlockMaterial.Stone)
                 return;
 
-            // 4. Class guard: no class = not any race (overrides HasTrait's null-class-returns-true default)
+            // No class = not any race; overrides HasTrait's null-class-returns-true default.
             string charClass = forPlayer.Entity.WatchedAttributes.GetString("characterClass");
             if (charClass == null)
                 return;
@@ -66,7 +52,6 @@ namespace rfmechanics
             if (charSys == null)
                 return;
 
-            // ── Dwarf: depth/altitude bonus ──
             if (cfg.EnableMiningCurve && charSys.HasTrait(forPlayer, cfg.DwarfTraitCode))
             {
                 try
@@ -79,12 +64,10 @@ namespace rfmechanics
                 catch (Exception ex)
                 {
                     LogExceptionOnce(ex);
-                    // Leave __result untouched on exception
                 }
                 return;
             }
 
-            // ── Goblin: flat stone-mining penalty ──
             if (cfg.EnableGoblinStonePenalty && charSys.HasTrait(forPlayer, cfg.GoblinTraitCode))
             {
                 try
@@ -94,7 +77,6 @@ namespace rfmechanics
                 catch (Exception ex)
                 {
                     LogExceptionOnce(ex);
-                    // Leave __result untouched on exception
                 }
             }
         }

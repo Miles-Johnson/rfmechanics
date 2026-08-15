@@ -5,18 +5,13 @@ using Vintagestory.API.Common;
 namespace rfmechanics
 {
     /// <summary>
-    /// One published aura per goblin, keyed by entity ID. Small static dictionary, not
-    /// ConditionalWeakTable -- this needs enumeration (GetStrengthAt walks every live source)
-    /// and is cross-behavior broadcast state, not per-instance bookkeeping tied to a single
-    /// behavior's own lifetime.
-    ///
-    /// Intensity is a magnitude-only scalar -- it is NEVER read by GetStrengthAt/SpatialFalloff.
-    /// Task 4 drives Intensity down as Radius grows (rot-fed goblins: wide-and-thin), which
-    /// would silently zero out any gating check that multiplied strength by Intensity before
-    /// comparing against a fixed threshold. Consumers that gate on "is this position under an
-    /// aura at all" (e.g. the crop-stunt behavior) must use the pure spatial falloff this class
-    /// returns; consumers that need an actual effect magnitude (e.g. spoilage acceleration)
-    /// apply Intensity themselves, separately, at the point they compute that magnitude.
+    /// One published aura per goblin, keyed by entity ID. Dictionary, not ConditionalWeakTable:
+    /// GetStrengthAt needs to enumerate every live source, and this is cross-behavior broadcast
+    /// state, not per-instance bookkeeping.
+    /// Intensity is NEVER read by GetStrengthAt/SpatialFalloff -- it shrinks as Radius grows
+    /// (rot-fed goblins), which would silently zero out any gating check that multiplied it in
+    /// before comparing to a threshold. Consumers gating on "under an aura at all" must use this
+    /// class's pure spatial falloff; consumers needing an effect magnitude apply Intensity themselves.
     /// </summary>
     public readonly struct AuraSource
     {
@@ -41,23 +36,12 @@ namespace rfmechanics
             sources.Remove(entityId);
         }
 
-        /// <summary>
-        /// Read-only snapshot of every currently registered source, keyed by entity ID -- for
-        /// the /rfrotaura registry debug command only. Lets an admin directly confirm a
-        /// goblin's entry disappears on logout instead of inferring it from side effects
-        /// (crops resuming growth, containers no longer accelerating).
-        /// </summary>
+        /// <summary>For the /rfrotaura debug command -- lets an admin confirm an entry disappears on logout rather than inferring it from side effects.</summary>
         public static IReadOnlyDictionary<long, AuraSource> AllSources => sources;
 
-        /// <summary>
-        /// Pure spatial falloff (0..1) over every non-stale registered source -- the maximum
-        /// across all of them, never multiplied by Intensity. Sources older than staleAfterMs
-        /// are skipped: entries are explicitly cleared on despawn, but this is the backstop for
-        /// anything that misses that (an exception before the clear runs, death handling that
-        /// doesn't despawn the entity, etc.) -- without it a missed clear would leave a stale
-        /// AuraSource parked at its last position forever, since a static dictionary has no TTL
-        /// of its own.
-        /// </summary>
+        /// <summary>Max pure spatial falloff (0..1) across every non-stale source, never
+        /// multiplied by Intensity. staleAfterMs is the backstop for a missed despawn clear --
+        /// without it a stale AuraSource would sit parked forever (a static dictionary has no TTL of its own).</summary>
         public static float GetStrengthAt(BlockPos pos, long nowMs, long staleAfterMs)
         {
             float best = 0f;
@@ -70,11 +54,7 @@ namespace rfmechanics
             return best;
         }
 
-        /// <summary>
-        /// Cylinder falloff: horizontal and vertical distance handled independently, not a true
-        /// cube-applies-uniformly effect. Factored out so the sweep (Task 1) and the crop-stunt
-        /// gate (Task 3) can never drift apart from each other's geometry.
-        /// </summary>
+        /// <summary>Cylinder falloff: horizontal and vertical distance handled independently, not a true cube-applies-uniformly effect.</summary>
         public static float SpatialFalloff(AuraSource src, BlockPos pos)
         {
             double dh = System.Math.Sqrt(System.Math.Pow(pos.X + 0.5 - src.Pos.X, 2) + System.Math.Pow(pos.Z + 0.5 - src.Pos.Z, 2));

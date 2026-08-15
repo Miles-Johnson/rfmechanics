@@ -8,19 +8,11 @@ namespace rfmechanics
 {
     /// <summary>
     /// Server-authoritative walkspeed bonus for Elves standing near living trees. Scans a
-    /// radius around the entity for "log-grown"-prefixed blocks (vanilla's own convention
-    /// for a standing tree log vs. a cut/placed one, see BlockLog.cs) with inverse-distance
-    /// falloff -- same scan shape as EntityBehaviorBodyTemperature.getNearHeatSourceStrength,
-    /// tick-throttled the same way (~3s, server-side only).
-    ///
-    /// Writes entity.Stats.Set("walkspeed", "treeproximity", value) -- a source distinct
-    /// from "trait" (rf-elf-positive's own flat walkspeed bonus, traits.json), so it stacks
-    /// additively via the WeightedSum blend instead of overwriting it.
-    ///
-    /// Attached to the player entity type via a JSON patch (seraph-treeproximity.json) --
-    /// it ticks for every player, and the
-    /// elf gate lives inside IsElf(), matching the guard-chain shape every other rfmechanics
-    /// elf patch uses (BranchyLeavesPassthroughPatch).
+    /// radius for "log-grown"-prefixed blocks (vanilla's convention for a standing tree log vs.
+    /// a cut/placed one) with inverse-distance falloff, same scan shape as
+    /// EntityBehaviorBodyTemperature.getNearHeatSourceStrength.
+    /// Writes Stats.Set("walkspeed", "treeproximity", value) -- a source distinct from "trait"
+    /// (rf-elf-positive's own flat bonus), so it stacks additively via the WeightedSum blend.
     /// </summary>
     public class RFTreeProximityBehavior : EntityBehavior
     {
@@ -45,8 +37,7 @@ namespace rfmechanics
 
             if (!IsElf())
             {
-                // Not an elf (or no class yet): clear any previously applied bonus rather
-                // than leaving it stuck from before a race/class change.
+                // Clears any previously applied bonus rather than leaving it stuck from before a race/class change.
                 TrySet(1f, cfg);
                 return;
             }
@@ -56,13 +47,7 @@ namespace rfmechanics
             TrySet(walkspeed, cfg);
         }
 
-        /// <summary>
-        /// Guard chain matching every other rfmechanics elf gate (see
-        /// BranchyLeavesPassthroughPatch.GenerateCollisionBoxListPostfix): EntityPlayer
-        /// check, then characterClass null check (load-bearing -- HasTrait returns true for
-        /// a null class by default, so classless entities must be explicitly excluded), then
-        /// the trait check itself.
-        /// </summary>
+        // charClass null-check is load-bearing: HasTrait returns true for a null class by default.
         private bool IsElf()
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -81,13 +66,7 @@ namespace rfmechanics
             return charSys.HasTrait(iplayer, cfg.ElfTraitCode);
         }
 
-        /// <summary>
-        /// Proximity scan, same shape as
-        /// EntityBehaviorBodyTemperature.getNearHeatSourceStrength: WalkBlocks over a
-        /// bounding box around the entity, inverse-distance falloff. "log-grown" path
-        /// prefix identifies a standing tree log (BlockLog.cs's own convention), excluding
-        /// cut/placed logs and firewood on purpose.
-        /// </summary>
+        /// <summary>"log-grown" prefix identifies a standing tree log; cut/placed logs and firewood are excluded on purpose.</summary>
         private float GetNearTreeStrength(int radius)
         {
             BlockPos centerPos = entity.Pos.AsBlockPos;
@@ -114,11 +93,7 @@ namespace rfmechanics
             return GameMath.Clamp(strength, 0f, 1f);
         }
 
-        /// <summary>
-        /// Write-threshold gate before Stats.Set --
-        /// Stats.Set marks WatchedAttributes dirty on every call, so unconditional per-tick
-        /// writes would cause sync stutter.
-        /// </summary>
+        /// <summary>Write-threshold gate before Stats.Set, which marks WatchedAttributes dirty on every call -- unconditional per-tick writes would cause sync stutter.</summary>
         private void TrySet(float newValue, RFMechanicsConfig cfg)
         {
             float threshold = (float)cfg.TreeProximityStatWriteThreshold;

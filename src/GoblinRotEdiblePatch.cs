@@ -7,10 +7,9 @@ namespace rfmechanics
 {
     /// <summary>
     /// Postfix on CollectibleObject.GetNutritionProperties -- grants game:rot a minimal
-    /// FoodNutritionProperties for goblins only (rf-goblin-positive trait), so vanilla's
-    /// tryEatBegin/tryEatStep/tryEatStop (which gate solely on this returning non-null) let
-    /// them eat it. Never overrides an existing non-null result, so ordering against
-    /// dietsetup's own postfix on this same method is irrelevant.
+    /// FoodNutritionProperties for goblins only, so vanilla's tryEatBegin/Step/Stop (which gate
+    /// solely on this returning non-null) let them eat it. Never overrides an existing non-null
+    /// result, so ordering against dietsetup's own postfix on this method is irrelevant.
     /// </summary>
     [HarmonyPatch(typeof(CollectibleObject), nameof(CollectibleObject.GetNutritionProperties))]
     public static class GoblinRotEdiblePatch

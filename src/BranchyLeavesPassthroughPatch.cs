@@ -10,25 +10,15 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Two Harmony postfixes on CachingCollisionTester so branchy leaves (game code prefix
-    /// "leavesbranchy" — solid-sided unlike regular leaves, see BlockLeaves.cs) don't block
-    /// Elf movement, without any signature change to Block.GetCollisionBoxes, any block
-    /// subclass, or movement integration itself.
-    ///
-    /// PhysicsBehaviorBase.collisionTester is a single [ThreadStatic] CachingCollisionTester
-    /// reused across every entity ticked on that thread. AssignToEntity(entityPhysics, dim)
-    /// is called synchronously immediately before that entity's own collision test
-    /// (EntityBehaviorControlledPhysics.SetState / EntityBehaviorPassivePhysics), so "which
-    /// entity does this tester instance currently belong to" is well-defined at the moment
-    /// GenerateCollisionBoxList runs afterward in the same call chain — there is no
-    /// reentrancy across entities within a single thread's tick. A ConditionalWeakTable
-    /// keyed on the tester instance records that binding, since Harmony cannot add a real
-    /// field to an existing type; this also naturally handles one binding per physics
-    /// thread (client + server) without us managing thread-locals ourselves.
-    ///
-    /// The filter runs as a postfix on GenerateCollisionBoxList — after CollisionBoxList is
-    /// populated from the block query, before ApplyTerrainCollision's pushOutX/Y/Z calls —
-    /// so this is strictly post-query, pre-push-out.
+    /// Harmony postfixes on CachingCollisionTester so branchy leaves ("leavesbranchy" -- solid-
+    /// sided unlike regular leaves) don't block Elf movement, without touching
+    /// Block.GetCollisionBoxes, any block subclass, or movement integration directly.
+    /// ConditionalWeakTable binds each [ThreadStatic] tester instance to the entity it's
+    /// currently testing (Harmony can't add a field to an existing type); AssignToEntity runs
+    /// synchronously right before that entity's own collision test, so there's no cross-entity
+    /// reentrancy within a thread's tick. Filter runs as a postfix on
+    /// GenerateCollisionBoxList, strictly after CollisionBoxList is populated and before
+    /// ApplyTerrainCollision's push-out.
     /// </summary>
     [HarmonyPatch]
     public static class BranchyLeavesPassthroughPatch
@@ -36,8 +26,7 @@ namespace rfmechanics
         private static readonly ConditionalWeakTable<CachingCollisionTester, Entity> testerEntity = new();
         private static bool loggedException = false;
 
-        // PhysicsBehaviorBase.collisionTester is protected internal static, not directly
-        // accessible from this class/assembly - read reflectively via AccessTools.
+        // protected internal static, not accessible from this assembly directly.
         private static readonly System.Reflection.FieldInfo CollisionTesterField =
             AccessTools.Field(typeof(PhysicsBehaviorBase), "collisionTester");
 
@@ -50,15 +39,10 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// EntityBehaviorPlayerPhysics (the behavior that actually drives real players,
-        /// client and server both) overrides OnPhysicsTick and routes through its own
-        /// SimPhysics instead of calling base.OnPhysicsTick() - the one method that calls
-        /// AssignToEntity. So for player entities specifically, AssignToEntity never fires,
-        /// the testerEntity binding above is never populated, and
-        /// GenerateCollisionBoxListPostfix bails at the "no binding" guard on every call,
-        /// regardless of trait or block. This prefix restores the missing call so
-        /// AssignToEntityPostfix runs for players the same as it already does for every
-        /// other controlled/passive-physics entity.
+        /// EntityBehaviorPlayerPhysics overrides OnPhysicsTick and routes through its own
+        /// SimPhysics instead of calling base.OnPhysicsTick() (the method that calls
+        /// AssignToEntity), so for players AssignToEntity never fires and the testerEntity
+        /// binding is never populated; this prefix restores that missing call for players.
         /// </summary>
         [HarmonyPatch(typeof(EntityBehaviorPlayerPhysics), nameof(EntityBehaviorPlayerPhysics.SimPhysics))]
         [HarmonyPrefix]
@@ -93,9 +77,7 @@ namespace rfmechanics
 
                 if (!testerEntity.TryGetValue(__instance, out Entity? entity)) return;
 
-                // Class guard: no class = not an elf (overrides HasTrait's
-                // null-class-returns-true default). Same guard chain shape as
-                // ClimbSpeedPatch/ClimbCollideAssistPatch.
+                // No class = not an elf; overrides HasTrait's null-class-returns-true default.
                 if (entity is not EntityPlayer player) return;
 
                 string charClass = player.WatchedAttributes.GetString("characterClass");
@@ -119,30 +101,15 @@ namespace rfmechanics
                     RFMechanicsModSystem.Api?.Logger?.Warning(
                         "[rfmechanics] Exception in BranchyLeavesPassthroughPatch: {0}", ex);
                 }
-                // Leave CollisionBoxList unfiltered on exception
             }
         }
 
         /// <summary>
-        /// In-place removal of branchy-leaf cuboids from an already-populated
-        /// CachedCuboidListFaster. Identification mirrors vanilla's own convention
-        /// (ItemAxe.cs: block.Code.Path.Contains("branchy")) rather than inventing a new
-        /// one. CachedCuboidListFaster exposes no RemoveAt, so this compacts the three
-        /// parallel arrays (cuboids/positions/blocks) in place and shrinks Count — the same
-        /// shape as a manual List&lt;T&gt;.RemoveAll. Safe to call on an unchanged list
-        /// (e.g. when GenerateCollisionBoxList's own early-return skipped a rebuild this
-        /// call) since branchy entries removed on a prior call are simply already gone.
-        ///
-        /// cuboids[] holds Cuboidd instances, which are a mutable *reference* type -
-        /// CachedCuboidListFaster.Add reuses slots across ticks by mutating them via
-        /// .Set(...) in place (its populatedSize optimization avoids reallocating when
-        /// Count shrinks then regrows). Compacting by copying the element reference
-        /// (list.cuboids[write] = list.cuboids[read]) would alias two slots onto the same
-        /// object; a later in-place mutation of one slot (e.g. a subsequent rebuild
-        /// overwriting an unrelated block's cuboid) would then silently corrupt the other
-        /// slot's data too - observed in-game as the player intermittently falling through
-        /// solid ground shortly after passing through branchy leaves. Copying values
-        /// through the existing object at the destination slot avoids the aliasing.
+        /// cuboids[] holds Cuboidd as a mutable *reference* type reused across ticks in place
+        /// (CachedCuboidListFaster's populatedSize optimization), so compacting must copy values
+        /// through the existing object at the destination slot -- copying the reference itself
+        /// would alias two slots and a later in-place mutation would silently corrupt both
+        /// (observed in-game as falling through solid ground after passing through branchy leaves).
         /// </summary>
         private static void FilterBranchyLeaves(CachedCuboidListFaster list)
         {

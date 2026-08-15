@@ -7,23 +7,15 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Block behavior letting a goblin spend a spit charge (see GoblinSpitChargeGrantPatch) to
-    /// apply repair via empty-hand interact, on the same 7 reparable blocktypes vanilla's own
-    /// Reparable behavior covers. Declared after "Reparable" in each blocktype's behaviors array
-    /// (confirmed via the reparable-resolution diagnostic that Reparable returns PassThrough on
-    /// empty-hand, so this behavior is free to claim it -- though in practice the two never
-    /// compete since this behavior only acts when the hotbar slot is empty, and Reparable only
-    /// acts when it holds a repairGain item).
-    ///
-    /// Mirrors BlockBehaviorReparable.OnBlockInteractStart's repair-application shape
-    /// (reference/upstream/vssurvivalmod/BlockBehavior/BehaviorReparable.cs:123-221) rather than
-    /// reimplementing it: same claims check, same bec.repairState/reparability gate, same
-    /// repairState increment formula, same client-side sound gate, same absence of an explicit
-    /// Blockentity.MarkDirty() call (grepped both BehaviorReparable.cs and
-    /// BEBehaviorShapeFromAttributes.cs -- vanilla never calls it on this path either). The one
-    /// deliberate deviation: vanilla consumes glue from the held ItemSlot (IBlockMealContainer /
-    /// BlockLiquidContainerBase / slot.TakeOut(1)); there is no ItemSlot here, so a spit charge
-    /// on WatchedAttributes is decremented instead.
+    /// Block behavior letting a goblin spend a spit charge to apply repair via empty-hand
+    /// interact, on the same reparable blocktypes vanilla's Reparable behavior covers. Declared
+    /// after "Reparable" in each blocktype's behaviors array -- Reparable returns PassThrough on
+    /// empty-hand, so this is free to claim it, and in practice the two never compete since this
+    /// only acts on an empty hotbar slot while Reparable only acts when holding a repairGain item.
+    /// Mirrors BlockBehaviorReparable.OnBlockInteractStart's repair-application shape (same
+    /// claims check, repairState increment formula, sound gate, no explicit MarkDirty) rather
+    /// than reimplementing it. Deliberate deviation: vanilla consumes glue from the held
+    /// ItemSlot; there is no ItemSlot here, so a spit charge on WatchedAttributes is decremented instead.
     /// </summary>
     public class RfGoblinSpitRepairBehavior : BlockBehavior
     {
@@ -51,8 +43,7 @@ namespace rfmechanics
 
             EntityPlayer player = byPlayer.Entity;
 
-            // Load-bearing null check -- HasTrait returns true for a null class. Same pattern as
-            // GoblinSpitChargeGrantPatch/GoblinRotEdiblePatch/GoblinSpitPackingPatch.
+            // Load-bearing: HasTrait returns true for a null class.
             string charClass = player.WatchedAttributes.GetString("characterClass");
             if (string.IsNullOrEmpty(charClass))
             {
@@ -97,8 +88,7 @@ namespace rfmechanics
                 double repairQuantity = cfg.SpitRepairGain;
                 if (repairQuantity < 0.001)
                 {
-                    // Mirrors BehaviorReparable.cs:145-148's "gluehardened" rejection -- reachable
-                    // only if SpitRepairGain is ever tuned near zero; no state change either way.
+                    // Mirrors vanilla's "gluehardened" rejection; reachable only if SpitRepairGain is tuned near zero.
                     message = "Your spit has hardened -- no repair applied.";
                 }
                 else

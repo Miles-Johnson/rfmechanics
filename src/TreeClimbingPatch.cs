@@ -8,38 +8,21 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Lets Elves climb standing tree trunks ("log-grown"-prefixed block code — vanilla's own
-    /// convention for a living tree vs. a cut/placed log, see BlockLog.cs and
-    /// RFTreeProximityBehavior.cs, which already uses the same prefix check) as if they were
-    /// ladders, at plain vanilla ladder speed (climbUpSpeed/climbDownSpeed, no separate cost or
-    /// curve unlike ClimbSpeedPatch/ClimbSaturationPatch for dwarves).
-    ///
-    /// Two postfixes, both on EntityBehaviorControlledPhysics (confirmed via reflection against
-    /// the installed VSEssentials.dll that EntityBehaviorPlayerPhysics does not override either
-    /// method, so patching the base class covers players — unlike OnPhysicsTick, which it does
-    /// override; see BranchyLeavesPassthroughPatch.SimPhysicsPrefix for that lesson):
-    ///
-    /// - MotionAndCollisionPostfix does the actual work: it's the one that makes movement
-    ///   happen. Per-tick call order (see EntityBehaviorPlayerPhysics.SimPhysics) is
-    ///   MotionAndCollision (applies gravity/other PModules to pos.Motion) then ApplyTests
-    ///   (vanilla's own ladder-climb detection + its climb-speed motion.Y correction + finally
-    ///   ApplyTerrainCollision, which is what actually consumes pos.Motion to move the entity).
-    ///   A first version of this patch only postfixed ApplyTests, imitating vanilla's own
-    ///   controls.IsClimbing flag — that ran too late in the same tick to affect that tick's
-    ///   ApplyTerrainCollision call, AND because PModuleGravity.Applicable() skips gravity
-    ///   whenever controls.IsClimbing is true, the stale flag left over from one tick's postfix
-    ///   suppressed gravity at the START of the *next* tick's MotionAndCollision (before vanilla
-    ///   ever got a chance to re-derive it) without ever running the actual climb-speed
-    ///   correction — observed in-game as sticking to the tree with no gravity, but no vertical
-    ///   movement either. Postfixing MotionAndCollision instead runs before
-    ///   ApplyTerrainCollision consumes pos.Motion, so the correction takes effect the same
-    ///   tick, and it sets pos.Motion.Y to an absolute value rather than relying on
-    ///   controls.IsClimbing to have suppressed gravity in advance, so it doesn't matter whether
-    ///   gravity already ran this tick or not.
-    /// - ApplyTestsPostfix is cosmetic only now (controls.IsClimbing / entity.ClimbingOnFace /
-    ///   ClimbingOnCollBox, for animation state) and only fires when vanilla's own scan found
-    ///   nothing, so a real ladder — including one built onto a tree — still takes priority and
-    ///   behaves exactly as vanilla intends.
+    /// Lets Elves climb standing tree trunks ("log-grown"-prefixed, vanilla's convention for a
+    /// living tree vs. a cut/placed log) as if they were ladders, at plain vanilla ladder speed.
+    /// Two postfixes on EntityBehaviorControlledPhysics, not EntityBehaviorPlayerPhysics: that
+    /// subclass overrides OnPhysicsTick but not these two methods, so patching the base class
+    /// covers players (see BranchyLeavesPassthroughPatch.SimPhysicsPrefix for the OnPhysicsTick case).
+    /// MotionAndCollisionPostfix does the real work, not ApplyTestsPostfix: an earlier version
+    /// postfixed only ApplyTests (mirroring vanilla's IsClimbing flag), but that ran too late to
+    /// affect that tick's ApplyTerrainCollision, and PModuleGravity.Applicable() skipping gravity
+    /// off the stale flag from the previous tick's postfix suppressed gravity without ever
+    /// running the climb-speed correction -- observed in-game as sticking to the tree with no
+    /// gravity and no vertical movement. Postfixing MotionAndCollision runs before
+    /// ApplyTerrainCollision consumes pos.Motion and sets an absolute value, so it's independent
+    /// of whether gravity already ran that tick.
+    /// ApplyTestsPostfix is cosmetic only now (animation state), firing only when vanilla's own
+    /// scan found nothing, so a real ladder (even one built onto a tree) still takes priority.
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorControlledPhysics))]
     public static class TreeClimbingPatch
@@ -65,10 +48,7 @@ namespace rfmechanics
                 }
                 else
                 {
-                    // Hover in place: cancel out whatever gravity/other modules already applied
-                    // to Motion.Y this tick (unlike vanilla, we run after those modules, not
-                    // instead of them, so we can't rely on PModuleGravity.Applicable() having
-                    // skipped gravity for us).
+                    // Cancels whatever gravity/other modules already applied to Motion.Y this tick -- we run after those modules, not instead of them.
                     pos.Motion.Y = 0;
                 }
             }
@@ -99,13 +79,7 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>
-        /// Guard chain matching every other rfmechanics elf gate (see
-        /// BranchyLeavesPassthroughPatch.GenerateCollisionBoxListPostfix,
-        /// RFTreeProximityBehavior.IsElf): config toggle, EntityPlayer, vanilla's own
-        /// species-level CanClimb gate, characterClass null check (load-bearing — HasTrait
-        /// returns true for a null class by default), then the trait check itself.
-        /// </summary>
+        // charClass null-check is load-bearing: HasTrait returns true for a null class by default.
         private static bool TryGetElf(EntityBehaviorControlledPhysics behavior, out Entity? entity)
         {
             entity = null;
@@ -132,13 +106,9 @@ namespace rfmechanics
             return true;
         }
 
-        /// <summary>
-        /// Simplified re-implementation of BehaviorControlledPhysics.ApplyTests's own
-        /// horizontal-neighbor climb scan, substituting "log-grown" for Block.IsClimbable.
-        /// tmpPos.IterateHorizontalOffsets(i) is cumulative (each call offsets from tmpPos's
-        /// current value, not from a fixed origin) — it must be seeded at floor(pos) once
-        /// before the loop and never reset inside it, matching vanilla's own usage exactly.
-        /// </summary>
+        /// <summary>LANDMINE: tmpPos.IterateHorizontalOffsets(i) is cumulative (each call offsets
+        /// from tmpPos's current value, not a fixed origin) -- it must be seeded at floor(pos)
+        /// once before the loop and never reset inside it.</summary>
         private static bool TryFindTreeClimb(Entity entity, EntityPos pos, out BlockFacing? face, out Cuboidf? collBox)
         {
             face = null;

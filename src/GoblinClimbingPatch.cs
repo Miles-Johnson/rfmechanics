@@ -9,32 +9,15 @@ namespace rfmechanics
 {
     /// <summary>
     /// Lets Goblins climb standing tree trunks ("log-grown"-prefixed, same as Elf) and raw
-    /// natural rock (code-prefix whitelist below) as if they were ladders, at plain vanilla
-    /// ladder speed -- no saturation cost (settled at Part B review: vanilla's own baseline
-    /// hunger drain, EntityBehaviorHunger.SlowTick, has no IsClimbing-specific term at all --
-    /// climbing already costs exactly the same as any other non-idle Controls state in
-    /// vanilla, so shipping Goblin climbing hunger-free doesn't introduce an asymmetry against
-    /// vanilla's own ladder climbing, which is also free. Only Dwarf's ClimbSaturationPatch is
-    /// a deliberately ADDED cost specific to dwarves).
-    ///
-    /// A parallel class to TreeClimbingPatch (Elf), not an extension of it -- see
-    /// notes/goblin-phase-g2-partA-report.md A2 for why: raw rock is never vanilla
-    /// Climbable-flagged (unlike ladders), so the dwarf-style ClimbSpeedPatch/
-    /// ClimbCollideAssistPatch extension-of-vanilla-ladder-detection shape would never fire
-    /// for it -- only TreeClimbingPatch's self-contained-scan shape (own block scan, own
-    /// MotionAndCollision postfix, ApplyTests postfix only for cosmetic state when vanilla's
-    /// own scan found nothing) generalizes to non-ladder-flagged block types.
-    ///
-    /// Two independent match groups, each behind its own toggle (tree climbing and rock
-    /// climbing can be enabled/disabled independently): "log-grown" (EnableGoblinTreeClimbing)
-    /// and the raw-rock whitelist (EnableGoblinRockClimbing, GoblinRockClimbCodePrefixes --
-    /// four prefixes by default: rock-, crackedrock-, meteorite-, stalagsection-, NOT a single
-    /// "rock-" StartsWith check -- see Part A report A2 for why cracked rock/meteorite/
-    /// stalagmite are natural but don't share the "rock-" prefix, and why worked stone
-    /// (cobblestone/polished/stonebricks/quartz/etc.) must stay excluded).
-    ///
-    /// Same two-postfix shape as TreeClimbingPatch (see that file's doc comment for the full
-    /// reasoning on why MotionAndCollision must be postfixed, not just ApplyTests).
+    /// natural rock (whitelist below) as if they were ladders, at plain vanilla ladder speed --
+    /// no saturation cost, since vanilla's own baseline hunger drain has no IsClimbing-specific
+    /// term at all (only Dwarf's ClimbSaturationPatch is a deliberately ADDED cost).
+    /// Parallel to TreeClimbingPatch (Elf), not an extension of it: raw rock is never vanilla
+    /// Climbable-flagged, so the dwarf-style extension-of-vanilla-ladder-detection shape never
+    /// fires for it -- only TreeClimbingPatch's self-contained-scan shape generalizes.
+    /// Tree and rock climbing are independently toggleable; the rock whitelist
+    /// (GoblinRockClimbCodePrefixes) is four explicit prefixes, not a single "rock-"
+    /// StartsWith, so cracked rock/meteorite/stalagmite count as natural while worked stone stays excluded.
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorControlledPhysics))]
     public static class GoblinClimbingPatch
@@ -60,9 +43,7 @@ namespace rfmechanics
                 }
                 else
                 {
-                    // Hover in place: cancel out whatever gravity/other modules already applied
-                    // to Motion.Y this tick, matching TreeClimbingPatch's own reasoning (we run
-                    // after those modules, not instead of them).
+                    // Cancels whatever gravity/other modules already applied to Motion.Y this tick -- runs after those modules, not instead of them.
                     pos.Motion.Y = 0;
                 }
             }
@@ -93,14 +74,10 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>
-        /// Guard chain matching every other rfmechanics race gate: EntityPlayer check, vanilla's
-        /// own species-level CanClimb gate, characterClass null check (load-bearing -- HasTrait
-        /// returns true for a null class by default), then the trait check itself. Does NOT
-        /// gate on either EnableGoblinTreeClimbing/EnableGoblinRockClimbing here -- those are
-        /// per-match-group toggles checked inside TryFindGoblinClimb, since a goblin with one
-        /// toggle off and the other on should still get partial climbing.
-        /// </summary>
+        /// <summary>charClass null check is load-bearing (HasTrait returns true for a null class
+        /// by default). Does not gate on EnableGoblinTreeClimbing/EnableGoblinRockClimbing here --
+        /// those are per-match-group toggles inside TryFindGoblinClimb, so one toggle off and the
+        /// other on still gets partial climbing.</summary>
         private static bool TryGetGoblin(EntityBehaviorControlledPhysics behavior, out Entity? entity)
         {
             entity = null;
@@ -128,13 +105,7 @@ namespace rfmechanics
             return true;
         }
 
-        /// <summary>
-        /// Same horizontal-neighbor scan shape as TreeClimbingPatch.TryFindTreeClimb, but
-        /// checking against two independently-toggleable prefix groups instead of one fixed
-        /// prefix. "log-grown" (tree, same convention as Elf) and the raw-rock whitelist
-        /// (config-driven list, not hardcoded -- see GoblinRockClimbCodePrefixes) are checked
-        /// per block, first match wins.
-        /// </summary>
+        /// <summary>Same horizontal-neighbor scan shape as TreeClimbingPatch.TryFindTreeClimb, checking two independently-toggleable prefix groups instead of one fixed prefix.</summary>
         private static bool TryFindGoblinClimb(Entity entity, EntityPos pos, out BlockFacing? face, out Cuboidf? collBox)
         {
             face = null;

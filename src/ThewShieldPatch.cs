@@ -8,20 +8,13 @@ namespace rfmechanics
 {
     /// <summary>
     /// StarvationShieldWhileThew: while an orc's Thew &gt; 0, suppresses vanilla's own
-    /// starvation damage. Vanilla deals this via EntityBehaviorHunger.SlowTick
-    /// (reference/decompiled/VSEssentials/Vintagestory.GameContent/EntityBehaviorHunger.cs:460-466):
-    /// `if (Saturation &lt;= 0f) entity.ReceiveDamage(new DamageSource { Source =
-    /// EnumDamageSource.Internal, Type = EnumDamageType.Hunger }, 0.125f);` -- confirmed via the
-    /// decompiled enum orderings (EnumDamageSource.cs, EnumDamageType.cs) that (EnumDamageSource)7
-    /// == Internal and (EnumDamageType)8 == Hunger.
-    ///
+    /// starvation damage (EntityBehaviorHunger.SlowTick raises it as DamageSource { Source =
+    /// Internal, Type = Hunger }).
     /// Patched at EntityBehaviorHealth.OnEntityReceiveDamage instead of SlowTick itself, since
-    /// SlowTick also does unrelated cold-resistance stat work in the same method body that must
-    /// not be skipped -- a Harmony prefix can only skip a method's entire body, not part of it,
-    /// without a transpiler. OnEntityReceiveDamage is the actual damage-application choke point
-    /// (every damage source funnels through it, findings doc §4), and zeroing `damage` in a
-    /// prefix lets the original run harmlessly (Health -= 0) rather than skipping whatever else
-    /// that method does around the subtraction (death check, events).
+    /// SlowTick also does unrelated cold-resistance work in the same method body that must not
+    /// be skipped -- a Harmony prefix can only skip a method's entire body, not part of it,
+    /// without a transpiler. Zeroing `damage` here lets the original run harmlessly (Health -= 0)
+    /// rather than skipping whatever else OnEntityReceiveDamage does (death check, events).
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorHealth), nameof(EntityBehaviorHealth.OnEntityReceiveDamage))]
     public static class ThewShieldPatch
@@ -46,7 +39,7 @@ namespace rfmechanics
 
                 if (entity is not EntityPlayer player) return;
 
-                // Load-bearing null check -- see ThewBehavior.IsOrc's own comment.
+                // Load-bearing: HasTrait returns true for a null class by default.
                 string charClass = player.WatchedAttributes.GetString("characterClass");
                 if (string.IsNullOrEmpty(charClass)) return;
 
