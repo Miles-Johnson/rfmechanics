@@ -1,0 +1,8 @@
+[
+    {
+        "op": "add",
+        "path": "/behaviors/-",
+        "file": "game:blocktypes/stone/rock.json",
+        "value": { "name": "RfDwarfOreSong" }
+    }
+]

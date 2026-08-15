@@ -690,6 +690,42 @@ public class RFMechanicsConfig
     /// existing treeseed/stick drops -- does not replace them. Closes G1's open
     /// branchy-leaves ingredient-sourcing gap (see notes/goblin-phase-g1-as-built.md).</summary>
     public bool EnableElfLeafGathering { get; set; } = true;
+
+    // ── Dwarf ore-song (v1 wire-up) ──
+
+    /// <summary>Master toggle for the Dwarf ore-song mechanic (empty-hand knock on raw rock,
+    /// nearby ore/gem deposits answer with a positioned sound per material). Client-only,
+    /// no network traffic.</summary>
+    public bool DwarfOreSongEnabled { get; set; } = true;
+
+    /// <summary>Scan radius in blocks around the knocked rock. Capped at 20 by
+    /// DwarfOreSongModSystem (see notes/diagnostics/ore-song-discovery.md Q6 -- vanilla itself
+    /// routes comparable-or-smaller inline WalkBlocks scans onto a background thread; a v1
+    /// inline scan does not go past this cap).</summary>
+    public int OreSongRadius { get; set; } = 16;
+
+    /// <summary>Cooldown between ore-song triggers, milliseconds. Must stay &gt;= the longest
+    /// ore-song asset (10s) -- this is what prevents overlapping playback instead of any
+    /// fade/dispose-tracking logic (see the v1 brief's Phase 4 rationale).</summary>
+    public int OreSongCooldownMs { get; set; } = 10000;
+
+    /// <summary>Max number of material clusters played per knock. Clusters beyond the nearest
+    /// this many (by distance) are discarded silently.</summary>
+    public int OreSongMaxClusters { get; set; } = 3;
+
+    /// <summary>Greedy cluster-merge distance in blocks -- a hit joins an existing cluster of
+    /// the same material if within this distance of that cluster's centroid.</summary>
+    public double OreSongClusterMergeDistance { get; set; } = 6;
+
+    /// <summary>Floor applied to a cluster's final playback volume (gradeGain x
+    /// distanceFalloff), so distant/poor-grade deposits are still faintly audible rather than
+    /// silent.</summary>
+    public double OreSongVolumeFloor { get; set; } = 0.15;
+
+    /// <summary>Max random pitch jitter (+/-, fraction of 1.0) applied per cluster. Load-bearing,
+    /// not cosmetic -- two same-material clusters at identical pitch are phase-identical files
+    /// and comb-filter into sounding like one source.</summary>
+    public double OreSongPitchJitter { get; set; } = 0.05;
 }
 
 /// <summary>How OrcStomachMultiplier combines with racialability's own maxSaturationFactor

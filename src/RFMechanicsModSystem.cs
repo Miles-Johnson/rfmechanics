@@ -6,7 +6,6 @@ using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
-using Vintagestory.API.Client;
 using Vintagestory.GameContent;
 
 namespace rfmechanics
@@ -42,6 +41,7 @@ namespace rfmechanics
             api.RegisterEntityBehaviorClass("rfgoblinrotaura", typeof(GoblinRotAuraBehavior));
             api.RegisterCropBehavior("RfGoblinCropStunt", typeof(GoblinCropStuntBehavior));
             api.RegisterBlockBehaviorClass("RfGoblinSpitRepair", typeof(RfGoblinSpitRepairBehavior));
+            api.RegisterBlockBehaviorClass("RfDwarfOreSong", typeof(RfDwarfOreSongBehavior));
 
             // GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race), disabled -- see its class header.
             // api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(rfmechanics.BugRace.GoblinDigModifierBehavior));
@@ -316,11 +316,6 @@ namespace rfmechanics
                         return TextCommandResult.Success(string.Format("CalendarSpeedMul set to {0:F2}. Remember to set it back to 0.5 (vanilla default) when done testing.", mul));
                     })
                 .EndSubCommand();
-        }
-
-        public override void StartClientSide(ICoreClientAPI api)
-        {
-            base.StartClientSide(api);
         }
 
         /// <summary>Registered server-side only: EntityBehaviorHunger and entity.Attributes

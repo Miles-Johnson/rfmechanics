@@ -275,6 +275,15 @@ Logic intact on disk, not currently reachable at runtime — moved to `src/BugRa
   `GoblinSpitPackingPatch`) are **not** covered by this confirmation — both are disabled/
   re-homed to `src/BugRace/` as of Phase G3 (see Disabled/superseded below) and were not
   part of what was tested.
+- **Dwarf ore-song v1 (2026-08-14): built and compiled, not yet smoke-tested in-game.**
+  `DwarfOreSongModSystem.cs` (client-only lookup table) + `RfDwarfOreSongBehavior.cs`
+  (empty-hand knock on `rock.json` → scan + cluster + positioned playback), patched via
+  `patches/dwarf-ore-song-behavior.json`. Not yet in the feature-inventory table above — add
+  it there once in-game tested. See `notes/diagnostics/ore-song-discovery.md` and the
+  implementation brief for design/verification detail, including a deviation from the
+  brief's literal joint-ore-type instruction (verified against `ItemOre.cs` and the live
+  install's actual ore JSON) documented in `DwarfOreSongModSystem.ResolveJointMaterial`'s
+  doc comment.
 - **Goblin Phase G3 rot aura, carried-inventory extension (2026-08-12): sweeps nearby
   players' hotbar and worn-backpack contents, not just placed `BlockEntityContainer`s.**
   `GoblinRotAuraBehavior.cs`: extracted the per-slot larder-hold math into a shared
