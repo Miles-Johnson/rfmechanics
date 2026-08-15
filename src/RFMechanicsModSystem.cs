@@ -28,6 +28,7 @@ namespace rfmechanics
 
             // Load config — load-then-store pattern
             LoadConfig(api);
+            ValidateAttunementConfig(api, config);
 
             api.Logger.Notification("[rfmechanics] Config loaded. DwarfTraitCode={0}, EnableMiningCurve={1}, EnableOreCurve={2}, OreThreshold={3}, OreCeiling={4}, ClimbSpeedFactor={5}, ClimbSaturationPerSecond={6}, EnableClimbSpeed={7}, EnableClimbSaturation={8}, ElfTraitCode={9}, EnableBranchyLeavesPassthrough={10}, EnableTreeProximitySpeed={11}, TreeProximityRadius={12}, TreeProximityMaxBonus={13}, EnableTreeClimbing={14}, EnableFallDamageReduction={15}, FallDamageReductionFactor={16}, GoblinTraitCode={17}, EnableGoblinDarkvision={18}, GoblinDarkvisionStrength={19}, EnableGoblinFallDamageReduction={20}, GoblinFallDamageReductionFactor={21}",
                 config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
@@ -97,6 +98,30 @@ namespace rfmechanics
             if (!malformed)
             {
                 api.StoreModConfig(config, "rfmechanics.json");
+            }
+        }
+
+        /// <summary>
+        /// Guards the invariant AttunementThresholdHysteresis's own doc comment states but
+        /// can't enforce on its own: it must exceed the largest possible single-tick
+        /// attunement delta, or threshold-crossing events can chatter (see
+        /// ElfAttunementBehavior.EvaluateThresholds). The four rate/interval fields this
+        /// depends on are explicitly "tune in play" knobs, so a retune that quietly breaks the
+        /// bound would otherwise only surface as unexplained ThresholdCrossed spam, diagnosed
+        /// much later with none of this context on hand. Warning only, not a hard failure --
+        /// mirrors this codebase's existing "malformed config still starts, just logs loudly"
+        /// posture rather than refusing to start the mod over a tuning number.
+        /// </summary>
+        private static void ValidateAttunementConfig(ICoreAPI api, RFMechanicsConfig cfg)
+        {
+            double maxRate = Math.Max(cfg.AttunementDecayRate, Math.Max(cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild));
+            double maxTickDelta = maxRate * cfg.AttunementTickInterval;
+
+            if (cfg.AttunementThresholdHysteresis <= maxTickDelta)
+            {
+                api.Logger.Warning(
+                    "[rfmechanics] ElfAttunement: AttunementThresholdHysteresis ({0}) does not exceed the worst-case single-tick delta ({1:F3} = max(DecayRate={2}, GainRateGrove={3}, GainRateWild={4}) * TickInterval={5}) -- threshold-crossing events can chatter near a threshold. Raise AttunementThresholdHysteresis above {1:F3}.",
+                    cfg.AttunementThresholdHysteresis, maxTickDelta, cfg.AttunementDecayRate, cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild, cfg.AttunementTickInterval);
             }
         }
 
@@ -200,7 +225,28 @@ namespace rfmechanics
                     if (behavior == null)
                         return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
 
-                    AttunementDiagnostics diag = ElfAttunementContext.GetDiagnostics(entity);
+                    // Prefer the behavior's own per-tick cache (LastDiagnostics) over calling
+                    // ElfAttunementContext.GetDiagnostics fresh -- the tick already computes
+                    // this every AttunementTickInterval, so reusing it avoids a second full
+                    // evaluation (relevant once Phase 1b's census makes check 2 real). But the
+                    // cache is only trustworthy once the tick has actually been running: with
+                    // EnableElfAttunement off, or before this entity's first qualifying tick,
+                    // LastDiagnostics sits at its Unevaluated default forever -- reporting that
+                    // as if it were a real result would show "context=None, every check false"
+                    // regardless of the player's actual position, which is actively misleading
+                    // for exactly the situations someone reaches for this command to debug.
+                    string diagSource;
+                    AttunementDiagnostics diag;
+                    if (cfg.EnableElfAttunement && behavior.IsElfCached)
+                    {
+                        diag = behavior.LastDiagnostics;
+                        diagSource = "cached (last tick)";
+                    }
+                    else
+                    {
+                        diag = ElfAttunementContext.GetDiagnostics(entity);
+                        diagSource = cfg.EnableElfAttunement ? "live (not cached yet -- not currently an elf)" : "live (EnableElfAttunement=false, tick not running)";
+                    }
 
                     bool[] active = behavior.ActiveThresholdsSnapshot;
                     var thresholdParts = new System.Collections.Generic.List<string>();
@@ -211,8 +257,8 @@ namespace rfmechanics
                     }
 
                     string msg = string.Format(
-                        "attunement={0:F2} isElf={1} context={2} checks[forestNaturalGround={3} forestPresenceStub={4} groveMembershipStub={5}] thresholds=[{6}]",
-                        behavior.LiveAttunement, behavior.IsElfCached, diag.Context,
+                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresenceStub={5} groveMembershipStub={6}] thresholds=[{7}]",
+                        behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
                         diag.ForestNaturalGround, diag.ForestPresence, diag.GroveTier.HasValue,
                         string.Join(" ", thresholdParts));
 

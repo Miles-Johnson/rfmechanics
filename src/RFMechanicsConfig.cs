@@ -147,11 +147,16 @@ public class RFMechanicsConfig
 
     /// <summary>Per-second gain rate toward a grove's own tier ceiling while in
     /// AttunementContextKind.Grove. Groves don't exist yet (E1.2's grove check is stubbed to
-    /// never fire), so this is provisional/untested -- set at parity with AttunementDecayRate
-    /// (unlike the wild-forest rate) on the reasoning that a grove should be a genuinely
-    /// faster, more rewarding attunement path than wandering wild forest, not just a higher
-    /// ceiling reached at the same crawl. Revisit once Phase 1b/2 grove tiers exist.</summary>
-    public double AttunementGainRateGrove { get; set; } = 1.0;
+    /// never fire), so this is provisional/untested. Deliberately BELOW AttunementDecayRate
+    /// (0.6 vs 1.0), not at parity -- parity was the original draft, but at 1.0/s a grove
+    /// reaches 100 attunement in under two minutes, which makes the grove-tier ceiling the
+    /// only thing a grove is actually for (the ceiling is already the reward; the climb should
+    /// be too). Still meaningfully faster than AttunementGainRateWild (0.6 vs 0.3) so a grove
+    /// reads as a genuinely better path, not just a higher cap reached at the wild-forest
+    /// crawl. Revisit once Phase 1b/2 grove tiers (and their actual ceilings) exist --
+    /// higher-tier groves may want their own gain rate rather than sharing this one flat
+    /// number across every tier.</summary>
+    public double AttunementGainRateGrove { get; set; } = 0.6;
 
     /// <summary>Per-second decay rate toward the context's floor -- toward 0 in
     /// AttunementContextKind.None, or back down toward WildCeiling/the grove ceiling if a value
@@ -171,10 +176,10 @@ public class RFMechanicsConfig
     /// Unlike that field's source (fully recomputed from scratch every tick), attunement is an
     /// accumulator, so ElfAttunementBehavior tracks the true value in memory between flushes
     /// rather than re-deriving it from the last-written WatchedAttributes value -- otherwise a
-    /// sub-threshold delta would be silently lost every tick instead of accumulating. One
-    /// consequence: up to this much progress can be lost if the entity unloads between
-    /// flushes (e.g. a relog) -- accepted as a small, bounded tradeoff, same shape as any
-    /// write-gated stat in this codebase.</summary>
+    /// sub-threshold delta would be silently lost every tick instead of accumulating.
+    /// ElfAttunementBehavior.OnEntityDespawn force-flushes on unload/disconnect, so an ordinary
+    /// relog does not lose this drift -- the residual gap is only an ungraceful stop (crash,
+    /// force-kill) between flushes, not the disconnect path itself.</summary>
     public double AttunementWriteThreshold { get; set; } = 0.5;
 
     /// <summary>Attunement thresholds, in ascending order, that fire
@@ -187,9 +192,12 @@ public class RFMechanicsConfig
     /// at threshold + half, deactivates at threshold - half) -- prevents a value hovering near
     /// a threshold from firing a crossing event every tick. Must exceed the largest possible
     /// single-tick delta, i.e. max(AttunementDecayRate, AttunementGainRateGrove,
-    /// AttunementGainRateWild) * AttunementTickInterval (= max(1.0, 1.0, 0.3) * 2.0 = 2.0 at
-    /// current defaults) -- sized here at 2.5 for headroom. Re-check this bound if the rate or
-    /// interval defaults change; it is not derived automatically.</summary>
+    /// AttunementGainRateWild) * AttunementTickInterval (= max(1.0, 0.6, 0.3) * 2.0 = 2.0 at
+    /// current defaults) -- sized here at 2.5 for headroom. This bound is NOT derived
+    /// automatically from the rate/interval fields (retuning any of them in play can violate
+    /// it silently) -- RFMechanicsModSystem.ValidateAttunementConfig checks it at load time
+    /// and logs a warning naming both values if it's violated, so a bad retune surfaces
+    /// immediately instead of as unexplained threshold-event spam months later.</summary>
     public double AttunementThresholdHysteresis { get; set; } = 2.5;
 
     // ── Thew (Orc) ──

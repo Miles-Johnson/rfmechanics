@@ -6,15 +6,24 @@ using Vintagestory.GameContent;
 
 namespace rfmechanics
 {
+    /// <summary>threshold: which of RFMechanicsConfig.AttunementThresholds was crossed. active:
+    /// true if this crossing was upward (value now at/above threshold), false if downward. A
+    /// subscriber holds a bool per threshold rather than ever polling Attunement -- see
+    /// ElfAttunementBehavior.EvaluateThresholds.</summary>
+    public delegate void AttunementThresholdHandler(Entity entity, int threshold, bool active, float value);
+
     /// <summary>
     /// Phase 1a of the Elf attunement system. Owns a single 0-100 "attunement" float in
     /// WatchedAttributes -- this behavior is the ONLY writer of that key. Reasserts ownership
     /// every slow tick: the true value lives in liveAttunement (in-memory) and is stepped every
-    /// tick toward GetAttunementContext's ceiling/floor, flushed to WatchedAttributes (clamped
-    /// via the Attunement property setter) only once the drift since the last flush exceeds
-    /// AttunementWriteThreshold -- same write-avoidance shape as
-    /// RFTreeProximityBehavior.TrySet, adapted for an accumulator (see AttunementWriteThreshold's
-    /// doc comment for why a from-scratch recompute like TrySet's wouldn't work here).
+    /// tick toward the ceiling/floor of LastDiagnostics.Context (ElfAttunementContext.
+    /// GetDiagnostics, cached once per tick -- see LastDiagnostics' own doc comment for why),
+    /// flushed to WatchedAttributes (clamped via the Attunement property setter) only once the
+    /// drift since the last flush exceeds AttunementWriteThreshold -- same write-avoidance shape
+    /// as RFTreeProximityBehavior.TrySet, adapted for an accumulator (see AttunementWriteThreshold's
+    /// doc comment for why a from-scratch recompute like TrySet's wouldn't work here). Unflushed
+    /// drift is also force-flushed on despawn (see OnEntityDespawn) so a disconnect never loses
+    /// progress, only mid-session ticks can lag behind by up to the threshold.
     ///
     /// Attached to every player entity via a JSON patch (seraph-elfattunement.json), same
     /// convention as RFTreeProximityBehavior/ThewBehavior -- the elf-race gate lives inside
@@ -23,12 +32,6 @@ namespace rfmechanics
     /// like a real None context, so a race swap away from Elf self-heals the value back to 0
     /// over time instead of leaving it stuck.
     /// </summary>
-    /// <summary>threshold: which of RFMechanicsConfig.AttunementThresholds was crossed. active:
-    /// true if this crossing was upward (value now at/above threshold), false if downward. A
-    /// subscriber holds a bool per threshold rather than ever polling Attunement -- see
-    /// ElfAttunementBehavior.EvaluateThresholds.</summary>
-    public delegate void AttunementThresholdHandler(Entity entity, int threshold, bool active, float value);
-
     public class ElfAttunementBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-elf-attunement";
@@ -69,6 +72,17 @@ namespace rfmechanics
         /// walk CharacterSystem.HasTrait on a hot path -- Phase 3 reads this field directly
         /// instead of re-deriving it.</summary>
         public bool IsElfCached { get; private set; }
+
+        /// <summary>The full per-check breakdown from this entity's last tick, computed once
+        /// per tick via ElfAttunementContext.GetDiagnostics and reused for both the tick's own
+        /// stepping (context = LastDiagnostics.Context) and /rfattune's dump -- avoids
+        /// evaluating the three checks twice (once for the tick, once for the command) now
+        /// that checks 2/3 are free stubs. Revisit once Phase 1b's census makes check 2 real:
+        /// if the tick should go back to short-circuiting for its own sake, /rfattune should
+        /// fall back to calling GetDiagnostics fresh on-demand instead of reading a
+        /// short-circuited cache (a rare manual command re-paying that cost is fine; a
+        /// non-short-circuited tick paying it every 2s for every elf is not).</summary>
+        public AttunementDiagnostics LastDiagnostics { get; private set; } = AttunementDiagnostics.Unevaluated;
 
         public ElfAttunementBehavior(Entity entity) : base(entity) { }
 
@@ -113,11 +127,30 @@ namespace rfmechanics
 
             RefreshElfCache();
 
-            AttunementContext context = IsElfCached
-                ? ElfAttunementContext.GetAttunementContext(entity)
-                : AttunementContext.None;
+            LastDiagnostics = IsElfCached
+                ? ElfAttunementContext.GetDiagnostics(entity)
+                : AttunementDiagnostics.Unevaluated;
 
-            StepAttunement(context, cfg);
+            StepAttunement(LastDiagnostics.Context, cfg);
+        }
+
+        /// <summary>Flushes any unwritten liveAttunement drift to WatchedAttributes immediately
+        /// on despawn (covers disconnect) -- without this, up to AttunementWriteThreshold of
+        /// progress sits only in behavior memory and is lost the moment the entity unloads.
+        /// That's a bigger problem at the low end than the headline number suggests: the 0-10
+        /// band gates real thresholds (living harvest, climbing per the design doc), so a
+        /// player logging in and out repeatedly could otherwise get shaved back below a
+        /// threshold they'd just crossed, tick by tick, forever.</summary>
+        public override void OnEntityDespawn(EntityDespawnData despawnData)
+        {
+            if (entity.World.Side == EnumAppSide.Server && liveInitialized
+                && Math.Abs(liveAttunement - lastFlushedAttunement) > 0f)
+            {
+                Attunement = liveAttunement;
+                lastFlushedAttunement = Attunement;
+            }
+
+            base.OnEntityDespawn(despawnData);
         }
 
         /// <summary>
@@ -210,10 +243,27 @@ namespace rfmechanics
             return current;
         }
 
+        private bool loggedGroveCeilingFallback;
+
         /// <summary>Groves don't exist yet (Phase 1b/2) -- E1.2's grove check never returns a
-        /// tier, so this is unreachable in Phase 1a. Falls back to WildCeiling so the branch is
-        /// still well-defined rather than throwing if it's ever hit early.</summary>
-        private static float ResolveGroveCeiling(int tier, RFMechanicsConfig cfg) => (float)cfg.AttunementWildCeiling;
+        /// tier, so this is provably unreachable in Phase 1a. Falls back to WildCeiling so the
+        /// branch is still well-defined, but logs loudly (once per entity, not every tick) if
+        /// it's ever actually hit -- once groves exist, reaching this fallback means a real
+        /// tier-ceiling table is missing, which should look like a bug, not silently read as a
+        /// tuning number (25 is a plausible-looking ceiling for a low grove tier, which is
+        /// exactly what would make this dangerous to leave quiet).</summary>
+        private float ResolveGroveCeiling(int tier, RFMechanicsConfig cfg)
+        {
+            if (!loggedGroveCeilingFallback)
+            {
+                loggedGroveCeilingFallback = true;
+                RFMechanicsModSystem.Api?.Logger.Error(
+                    "[rfmechanics] ElfAttunement: ResolveGroveCeiling reached for grove tier {0} with no real tier-ceiling table -- falling back to AttunementWildCeiling ({1}). This is unreachable in Phase 1a (grove membership is always null); if groves now exist, this is a missing tier table, not a tuning gap.",
+                    tier, cfg.AttunementWildCeiling);
+            }
+
+            return (float)cfg.AttunementWildCeiling;
+        }
 
         /// <summary>Deterministic per-entity fraction of one tick interval, used once to seed
         /// accum so every elf's slow tick lands on a different real-time offset instead of all

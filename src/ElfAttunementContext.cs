@@ -50,29 +50,45 @@ namespace rfmechanics
             GroveTier = groveTier;
             Context = context;
         }
+
+        /// <summary>Placeholder for "the three checks were not run this tick" -- e.g. a
+        /// non-elf, which ElfAttunementBehavior skips straight to AttunementContext.None
+        /// without spending a GetDiagnostics call at all (the checks themselves are
+        /// race-independent -- a non-elf standing on forest-natural ground would pass check 1
+        /// same as an elf -- skipping is purely to avoid wasted work on every non-elf player's
+        /// tick, not because the checks would fail for them). Not the same as "all three
+        /// checks ran and failed" -- ForestNaturalGround/ForestPresence read false here as a
+        /// default, not a real evaluation result.</summary>
+        public static AttunementDiagnostics Unevaluated { get; } = new AttunementDiagnostics(false, false, null, AttunementContext.None);
     }
 
     /// <summary>
-    /// E1.2's context predicate. Three checks, ascending cost, short-circuiting -- most callers
-    /// (the tick) only ever need GetAttunementContext; GetDiagnostics (added E1.6) evaluates all
-    /// three independently, without short-circuiting, purely for the debug command.
+    /// E1.2's context predicate. GetDiagnostics is the actual source of truth: it evaluates all
+    /// three checks independently (no short-circuiting) so /rfattune can report which check
+    /// failed, not just the combined result -- see AttunementDiagnostics. GetAttunementContext
+    /// is a thin convenience wrapper over it for callers who only want the combined
+    /// None/WildForest/Grove(tier) result.
+    ///
+    /// Originally GetAttunementContext short-circuited and GetDiagnostics duplicated its
+    /// branching non-short-circuited, evaluated separately by the tick and by /rfattune. That
+    /// meant checks 2/3 could run twice per tick once /rfattune was called -- free while they're
+    /// O(1) stubs, but a real cost once Phase 1b's census makes check 2 expensive.
+    /// ElfAttunementBehavior now calls GetDiagnostics once per tick and caches the result
+    /// (LastDiagnostics) for /rfattune to read instead of re-evaluating, which is what makes
+    /// GetAttunementContext's own short-circuiting moot today -- it's kept as a live, correct,
+    /// non-duplicated API for any future caller that only needs the enum, not deleted, since a
+    /// Phase 1b revert to a short-circuited tick would want it back as a genuinely cheap path
+    /// again (at which point it should stop delegating to GetDiagnostics and regain its own
+    /// short-circuiting body).
     /// </summary>
     public static class ElfAttunementContext
     {
-        public static AttunementContext GetAttunementContext(Entity entity)
-        {
-            if (!IsOnForestNaturalGround(entity)) return AttunementContext.None;
-            if (!HasNearbyForestPresence_StubPhase1b(entity)) return AttunementContext.None;
-
-            int? groveTier = ResolveGroveMembership_StubPhase1b(entity);
-            return groveTier.HasValue ? AttunementContext.Grove(groveTier.Value) : AttunementContext.WildForest;
-        }
+        public static AttunementContext GetAttunementContext(Entity entity) => GetDiagnostics(entity).Context;
 
         /// <summary>
-        /// E1.6: non-short-circuiting sibling of GetAttunementContext -- evaluates all three
-        /// checks independently (even ones a real GetAttunementContext call wouldn't reach) so
-        /// /rfattune can report which check failed, not just the combined result. Debug-only;
-        /// GetAttunementContext itself stays short-circuiting for the tick's sake.
+        /// E1.6 (and, since the caching fix above, the tick's own source of truth too):
+        /// evaluates all three checks independently, without short-circuiting, so a caller can
+        /// see every check's real result rather than just the combined context.
         /// </summary>
         public static AttunementDiagnostics GetDiagnostics(Entity entity)
         {
