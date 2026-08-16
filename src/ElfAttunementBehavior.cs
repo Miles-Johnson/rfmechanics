@@ -76,12 +76,14 @@ namespace rfmechanics
         /// <summary>The full per-check breakdown from this entity's last tick, computed once
         /// per tick via ElfAttunementContext.GetDiagnostics and reused for both the tick's own
         /// stepping (context = LastDiagnostics.Context) and /rfattune's dump -- avoids
-        /// evaluating the three checks twice (once for the tick, once for the command) now
-        /// that checks 2/3 are free stubs. Revisit once Phase 1b's census makes check 2 real:
-        /// if the tick should go back to short-circuiting for its own sake, /rfattune should
-        /// fall back to calling GetDiagnostics fresh on-demand instead of reading a
-        /// short-circuited cache (a rare manual command re-paying that cost is fine; a
-        /// non-short-circuited tick paying it every 2s for every elf is not).</summary>
+        /// evaluating the three checks twice (once for the tick, once for the command). Phase 1b
+        /// (E1.11) confirmed the once-per-tick shape holds even with check 2 now a real census:
+        /// the tick still calls GetDiagnostics exactly once, now threading ForestCache through
+        /// it so a stationary elf's check 2 costs a coordinate+generation compare, not a real
+        /// census consult -- see ForestCache and ElfAttunementContext.ResolveForestPresence.
+        /// /rfattune's fallback path (used only when not currently an elf, or the system is
+        /// disabled) pays a fresh call but warms/reads this same cache rather than a second,
+        /// disconnected one.</summary>
         public AttunementDiagnostics LastDiagnostics { get; private set; } = AttunementDiagnostics.Unevaluated;
 
         /// <summary>E1.10: this entity's cached column coordinate/generation/forest-presence

@@ -127,17 +127,13 @@ namespace rfmechanics
     /// is a thin convenience wrapper over it for callers who only want the combined
     /// None/WildForest/Grove(tier) result.
     ///
-    /// Originally GetAttunementContext short-circuited and GetDiagnostics duplicated its
-    /// branching non-short-circuited, evaluated separately by the tick and by /rfattune. That
-    /// meant checks 2/3 could run twice per tick once /rfattune was called -- free while they're
-    /// O(1) stubs, but a real cost once Phase 1b's census makes check 2 expensive.
-    /// ElfAttunementBehavior now calls GetDiagnostics once per tick and caches the result
-    /// (LastDiagnostics) for /rfattune to read instead of re-evaluating, which is what makes
-    /// GetAttunementContext's own short-circuiting moot today -- it's kept as a live, correct,
-    /// non-duplicated API for any future caller that only needs the enum, not deleted, since a
-    /// Phase 1b revert to a short-circuited tick would want it back as a genuinely cheap path
-    /// again (at which point it should stop delegating to GetDiagnostics and regain its own
-    /// short-circuiting body).
+    /// ElfAttunementBehavior calls GetDiagnostics exactly once per tick and caches the result
+    /// (LastDiagnostics) for /rfattune to read instead of re-evaluating -- confirmed still true
+    /// as of Phase 1b (E1.11): StepAttunement/EvaluateThresholds take the already-resolved
+    /// AttunementContext as a parameter and never call back into this class, so check 2's real
+    /// census cost (Phase 1b, formerly a free stub) is paid at most once per tick, not per
+    /// tick-times-callers. GetAttunementContext stays a live, non-duplicated convenience API
+    /// for any future caller that only needs the enum.
     /// </summary>
     public static class ElfAttunementContext
     {
