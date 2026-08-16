@@ -66,6 +66,15 @@ namespace rfmechanics
         /// this mod's lazy-synchronous, main-thread-only design.</summary>
         private static readonly Dictionary<long, int> generationCache = new Dictionary<long, int>();
 
+        /// <summary>Columns whose persisted record already reads Timestamp=-1 from a felling this
+        /// cycle -- write-amplification guard for InvalidateColumn (E1.2/FIX3): a redwood pops
+        /// dozens of log blocks off one BFS sweep, each calling InvalidateColumn, but the moddata
+        /// write only needs to happen once (Timestamp=-1 already forces the next GetForestPresence
+        /// to rescan; writing it again is redundant). Cleared the moment a real scan completes and
+        /// persists a fresh Timestamp, so the next felling writes again. Same lifetime/thread-safety
+        /// contract as generationCache.</summary>
+        private static readonly HashSet<long> pendingRescan = new HashSet<long>();
+
         private static long ColumnKey(int chunkX, int chunkZ) => ((long)(uint)chunkX << 32) | (uint)chunkZ;
 
         private static void SeedGeneration(int chunkX, int chunkZ, int generation)
@@ -117,7 +126,11 @@ namespace rfmechanics
                 return ForestCensusResult.From(isForestCached, data.LogCount, data.Timestamp, data.Generation, true);
             }
 
-            int generation = data?.Generation ?? 0;
+            // Prefer the in-memory shadow over the persisted value: InvalidateColumn bumps it on
+            // every felling but may have skipped the moddata write (debounced, see pendingRescan),
+            // so moddata's Generation can lag. Falling back to the persisted value only matters on
+            // a column's first touch this session, when the shadow is still cold.
+            int generation = generationCache.TryGetValue(ColumnKey(cx, cz), out int cachedGen) ? cachedGen : (data?.Generation ?? 0);
             bool logTiming = cfg.AttunementCensusLogTiming;
 
             Stopwatch? sw = logTiming ? Stopwatch.StartNew() : null;
@@ -128,6 +141,7 @@ namespace rfmechanics
             mapChunk.SetModdata(ModDataKey, newData);
             mapChunk.MarkDirty();
             SeedGeneration(cx, cz, generation);
+            pendingRescan.Remove(ColumnKey(cx, cz));
 
             if (logTiming)
             {
@@ -142,24 +156,33 @@ namespace rfmechanics
 
         /// <summary>Called only from ElfForestCensusInvalidationPatch on a confirmed log-grown
         /// felling. Does NOT re-scan inline -- block breaks are far more frequent than a census
-        /// consult should tolerate re-scanning on -- it only marks the persisted record (and the
-        /// in-memory generation shadow) as due for a real scan on the next GetForestPresence
-        /// call, and bumps Generation so any entity's positional cache punches through
-        /// immediately regardless of its own TTL.</summary>
+        /// consult should tolerate re-scanning on. The in-memory generation shadow always bumps,
+        /// every call, so any entity's positional cache punches through immediately on the same
+        /// tick regardless of its own TTL. The moddata write (SetModdata+MarkDirty) is debounced
+        /// via pendingRescan: felling a tall tree pops dozens of log blocks off one BFS sweep, each
+        /// calling this method, but Timestamp=-1 only needs writing once -- it already forces the
+        /// next GetForestPresence to rescan, so repeating the write for every remaining block in
+        /// the same sweep bought nothing except moddata churn. pendingRescan clears itself the
+        /// moment that rescan actually runs, so the next felling writes again.</summary>
         public static void InvalidateColumn(IWorldAccessor world, BlockPos pos)
         {
             IMapChunk mapChunk = world.BlockAccessor.GetMapChunkAtBlockPos(pos);
             if (mapChunk == null) return; // a block just broken by a player is always in a loaded column
 
+            int cx = ToChunkCoord(pos.X);
+            int cz = ToChunkCoord(pos.Z);
+            long key = ColumnKey(cx, cz);
+
+            int newGeneration = (generationCache.TryGetValue(key, out int cachedGen) ? cachedGen : 0) + 1;
+            generationCache[key] = newGeneration;
+
+            if (!pendingRescan.Add(key)) return; // already queued by an earlier block in this same felling sweep
+
             ForestCensusData data = mapChunk.GetModdata<ForestCensusData>(ModDataKey) ?? new ForestCensusData();
-            data.Generation++;
+            data.Generation = newGeneration;
             data.Timestamp = -1;
             mapChunk.SetModdata(ModDataKey, data);
             mapChunk.MarkDirty();
-
-            int cx = ToChunkCoord(pos.X);
-            int cz = ToChunkCoord(pos.Z);
-            SeedGeneration(cx, cz, data.Generation);
         }
 
         /// <summary>Palette prefilter before per-cell scan: FuzzyListBlockIds per chunk section
