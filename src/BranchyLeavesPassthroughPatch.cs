@@ -102,7 +102,7 @@ namespace rfmechanics
                 // rather than assume, since that's what "foot level" means to the engine itself.
                 double footY = entity.Pos.Y + entity.CollisionBox.Y1;
 
-                FilterBranchyLeaves(__instance.CollisionBoxList, behavior.LeafStandingActive, footY);
+                FilterBranchyLeaves(__instance.CollisionBoxList, behavior.LeafStandingActive, footY, cfg.LogLeafStandingBoxCounts);
             }
             catch (Exception ex)
             {
@@ -129,14 +129,21 @@ namespace rfmechanics
         /// or landing elf is standing on (Y2 == footY exactly, once push-out has resolved) is
         /// never the one removed.
         /// </summary>
-        private static void FilterBranchyLeaves(CachedCuboidListFaster list, bool retainFootSupport, double footY)
+        private static void FilterBranchyLeaves(CachedCuboidListFaster list, bool retainFootSupport, double footY, bool logCounts)
         {
             int write = 0;
+            int stripped = 0;
+            int kept = 0;
             for (int read = 0; read < list.Count; read++)
             {
                 Block block = list.blocks[read];
                 bool isBranchy = block?.Code?.Path != null && block.Code.Path.Contains("branchy");
-                if (isBranchy && (!retainFootSupport || list.cuboids[read].Y2 > footY)) continue;
+                if (isBranchy)
+                {
+                    bool strip = !retainFootSupport || list.cuboids[read].Y2 > footY;
+                    if (strip) { stripped++; continue; }
+                    kept++;
+                }
 
                 if (write != read)
                 {
@@ -148,6 +155,12 @@ namespace rfmechanics
                 write++;
             }
             list.Count = write;
+
+            if (logCounts && (stripped > 0 || kept > 0))
+            {
+                RFMechanicsModSystem.Api?.Logger?.Notification(
+                    "[rfmechanics] leaf standing: stripped={0} kept={1} footY={2:F3}", stripped, kept, footY);
+            }
         }
     }
 }

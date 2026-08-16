@@ -70,6 +70,11 @@ public class RFMechanicsConfig
     /// standing.</summary>
     public int LeafStandingAttunementThreshold { get; set; } = 25;
 
+    /// <summary>Logs branchy-leaf boxes stripped vs. retained per FilterBranchyLeaves call.
+    /// Default off -- diagnostic only, for validating the E3.4 foot-level exclusion rule during
+    /// the manual test pass, not meant to run in production (this is a per-substep hot path).</summary>
+    public bool LogLeafStandingBoxCounts { get; set; } = false;
+
     // ── Tree proximity speed (Elf) ──
 
     /// <summary>Master toggle for the near-trees walkspeed bonus.</summary>

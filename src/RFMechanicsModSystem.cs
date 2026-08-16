@@ -203,12 +203,15 @@ namespace rfmechanics
         }
 
         /// <summary>Elf attunement diagnostics: the float, the resolved context, which of the
-        /// three GetAttunementContext checks individually passed/failed, and which threshold
-        /// bands are active. Server-side only: the live value lives in behavior memory plus WatchedAttributes, both only meaningful against the real server entity.</summary>
+        /// three GetAttunementContext checks individually passed/failed, which threshold
+        /// bands are active, and E3.4's leaf-standing gate (LeafStandingActive plus the
+        /// configured threshold it's compared against). Server-side only: the live value lives
+        /// in behavior memory plus WatchedAttributes, both only meaningful against the real
+        /// server entity.</summary>
         private void RegisterAttunementDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfattune")
-                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds.")
+                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds, leaf-standing gate.")
                 .RequiresPrivilege(Privilege.chat)
                 .HandleWith(args =>
                 {
@@ -256,12 +259,14 @@ namespace rfmechanics
 
                     string msg = string.Format(
                         "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5}] " +
-                        "census[logCount={6} threshold={7} cacheAgeMs={8} fromCache={9} cachedGen={10} currentGen={11}] thresholds=[{12}]",
+                        "census[logCount={6} threshold={7} cacheAgeMs={8} fromCache={9} cachedGen={10} currentGen={11}] thresholds=[{12}] " +
+                        "leafStanding[active={13} threshold={14}]",
                         behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
                         diag.ForestNaturalGround, diag.ForestPresence,
                         diag.ForestCensus.LogCount, cfg.AttunementCensusLogCountThreshold, cacheAgeMs, diag.ForestCensus.FromCache,
                         diag.ForestCensus.CachedGeneration, diag.ForestCensus.CurrentGeneration,
-                        string.Join(" ", thresholdParts));
+                        string.Join(" ", thresholdParts),
+                        behavior.LeafStandingActive, cfg.LeafStandingAttunementThreshold);
 
                     return TextCommandResult.Success(msg);
                 });
