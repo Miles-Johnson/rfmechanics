@@ -101,18 +101,18 @@ namespace rfmechanics
         /// failure -- retuning those rate/interval fields is expected, so this surfaces a bad retune immediately instead of as unexplained event spam later.</summary>
         private static void ValidateAttunementConfig(ICoreAPI api, RFMechanicsConfig cfg)
         {
-            double maxRate = Math.Max(cfg.AttunementDecayRate, Math.Max(cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild));
+            double maxRate = Math.Max(cfg.AttunementDecayRate, cfg.AttunementGainRate);
             double maxTickDelta = maxRate * cfg.AttunementTickInterval;
 
             if (cfg.AttunementThresholdHysteresis <= maxTickDelta)
             {
                 api.Logger.Warning(
-                    "[rfmechanics] ElfAttunement: AttunementThresholdHysteresis ({0}) does not exceed the worst-case single-tick delta ({1:F3} = max(DecayRate={2}, GainRateGrove={3}, GainRateWild={4}) * TickInterval={5}) -- threshold-crossing events can chatter near a threshold. Raise AttunementThresholdHysteresis above {1:F3}.",
-                    cfg.AttunementThresholdHysteresis, maxTickDelta, cfg.AttunementDecayRate, cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild, cfg.AttunementTickInterval);
+                    "[rfmechanics] ElfAttunement: AttunementThresholdHysteresis ({0}) does not exceed the worst-case single-tick delta ({1:F3} = max(DecayRate={2}, GainRate={3}) * TickInterval={4}) -- threshold-crossing events can chatter near a threshold. Raise AttunementThresholdHysteresis above {1:F3}.",
+                    cfg.AttunementThresholdHysteresis, maxTickDelta, cfg.AttunementDecayRate, cfg.AttunementGainRate, cfg.AttunementTickInterval);
             }
 
             // Phase 1b: an inverted/empty band silently under-scans (or never scans) instead of
-            // throwing, so this would otherwise surface as "check 2 never reads WildForest" with
+            // throwing, so this would otherwise surface as "check 2 never reads Forest" with
             // no obvious cause.
             if (cfg.AttunementCensusSurfaceBandBelow < 0 || cfg.AttunementCensusSurfaceBandAbove < 0)
             {
@@ -252,10 +252,10 @@ namespace rfmechanics
                         : entity.World.ElapsedMilliseconds - diag.ForestCensus.LastCheckedTimeMs;
 
                     string msg = string.Format(
-                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5} groveMembershipStub={6}] " +
-                        "census[logCount={7} threshold={8} cacheAgeMs={9} fromCache={10} cachedGen={11} currentGen={12}] thresholds=[{13}]",
+                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5}] " +
+                        "census[logCount={6} threshold={7} cacheAgeMs={8} fromCache={9} cachedGen={10} currentGen={11}] thresholds=[{12}]",
                         behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
-                        diag.ForestNaturalGround, diag.ForestPresence, diag.GroveTier.HasValue,
+                        diag.ForestNaturalGround, diag.ForestPresence,
                         diag.ForestCensus.LogCount, cfg.AttunementCensusLogCountThreshold, cacheAgeMs, diag.ForestCensus.FromCache,
                         diag.ForestCensus.CachedGeneration, diag.ForestCensus.CurrentGeneration,
                         string.Join(" ", thresholdParts));

@@ -123,29 +123,29 @@ public class RFMechanicsConfig
         "log-grown-", "log-placed-"
     };
 
-    /// <summary>Per-second gain rate toward WildCeiling. Deliberately much slower than
-    /// AttunementDecayRate (0.3 vs 1.0) so a nomadic elf dipping in and out of forest cover
-    /// trends toward hovering in the 5-15 band rather than banking the full WildCeiling.</summary>
-    public double AttunementGainRateWild { get; set; } = 0.3;
-
-    /// <summary>Per-second gain rate toward a grove's tier ceiling. Provisional/untested --
-    /// groves don't exist yet. Deliberately BELOW AttunementDecayRate (0.6 vs 1.0, not parity):
-    /// at parity a grove reaches 100 attunement in under two minutes, making the tier ceiling
-    /// the only thing a grove is for. Still faster than AttunementGainRateWild so a grove reads as a genuinely better path.</summary>
-    public double AttunementGainRateGrove { get; set; } = 0.6;
+    /// <summary>Per-second gain rate toward AttunementCeiling. TUNING (2026-08-17 grove-removal
+    /// re-spec): see notes/race-mechanics/elf-attunement-breakdown-v2.md's rate-repricing pass for
+    /// the derivation -- ~5/hour, chosen so threshold 10 arrives within a couple hours of forest
+    /// presence and the full 0-100 climb takes ~20 hours, matching the design doc's "short session
+    /// vs. long-term goal" split. Renamed from AttunementGainRateWild when the wild/grove split
+    /// was removed -- there is only one gain context now (Forest).</summary>
+    public double AttunementGainRate { get; set; } = 0.0013889;
 
     /// <summary>Per-second decay rate toward the context's floor -- toward 0 in
-    /// AttunementContextKind.None, or back down toward WildCeiling/the grove ceiling if a value
-    /// somehow sits above it. At this rate a full WildCeiling's worth of attunement (25) drains
-    /// in 25s of leaving forest entirely.</summary>
-    public double AttunementDecayRate { get; set; } = 1.0;
+    /// AttunementContextKind.None, or back down toward AttunementCeiling if a value somehow sits
+    /// above it. TUNING (2026-08-17 grove-removal re-spec): ~3.33x AttunementGainRate, the same
+    /// gain:decay ratio the old wild-forest numbers used (0.3 vs 1.0) -- preserves "loses ground
+    /// faster than it's gained" at the new scale. At this rate a full climb from 0 drains back to
+    /// 0 in ~6 hours of leaving forest entirely, against ~20 hours to build it.</summary>
+    public double AttunementDecayRate { get; set; } = 0.0046296;
 
-    /// <summary>Gain ceiling in AttunementContextKind.WildForest. Values above this decay back
+    /// <summary>Gain ceiling in AttunementContextKind.Forest. Values above this decay back
     /// toward it (AttunementDecayRate) rather than being hard-clamped -- see
-    /// ElfAttunementBehavior's tick step. Not coincidentally equal to one of
-    /// AttunementThresholds' four bands (25) -- an elf resting steadily in wild forest settles
-    /// exactly on that threshold.</summary>
-    public double AttunementWildCeiling { get; set; } = 25.0;
+    /// ElfAttunementBehavior's tick step. Renamed from AttunementWildCeiling (25) on 2026-08-17:
+    /// with no grove, there's no higher ceiling to sit below, so Forest now climbs to the same
+    /// 100 that the Attunement property itself clamps to -- this field exists as a separately
+    /// tunable server-config surface, not because the value is expected to differ from 100.</summary>
+    public double AttunementCeiling { get; set; } = 100.0;
 
     /// <summary>Minimum change in the live (in-memory) attunement value before it flushes to
     /// WatchedAttributes. Unlike a fully-recomputed field, attunement is an accumulator, so the

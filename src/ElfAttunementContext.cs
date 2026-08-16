@@ -8,31 +8,30 @@ namespace rfmechanics
     public enum AttunementContextKind
     {
         None,
-        WildForest,
-        Grove
+        Forest
     }
 
     /// <summary>
-    /// GetAttunementContext's result: None | WildForest | Grove(tier). GroveTier is only
-    /// meaningful when Kind == Grove -- construct via the static members/factory, never
-    /// directly, so an invalid (Kind, GroveTier) pairing can't be assembled by a caller.
+    /// GetAttunementContext's result: None | Forest. Renamed from a three-way
+    /// None/WildForest/Grove(tier) predicate on 2026-08-17 when groves were cut from the base
+    /// race (see notes/race-mechanics/grove-mod-design.md) -- no tier data to carry, so this is
+    /// a plain wrapper around the enum rather than a tagged union, kept as a struct so any future
+    /// caller pattern-matching on it doesn't need to change shape again if a grove mod someday
+    /// extends this via composition rather than a re-added tier field.
     /// </summary>
     public readonly struct AttunementContext
     {
         public AttunementContextKind Kind { get; }
-        public int GroveTier { get; }
 
-        private AttunementContext(AttunementContextKind kind, int groveTier)
+        private AttunementContext(AttunementContextKind kind)
         {
             Kind = kind;
-            GroveTier = groveTier;
         }
 
-        public static AttunementContext None { get; } = new AttunementContext(AttunementContextKind.None, 0);
-        public static AttunementContext WildForest { get; } = new AttunementContext(AttunementContextKind.WildForest, 0);
-        public static AttunementContext Grove(int tier) => new AttunementContext(AttunementContextKind.Grove, tier);
+        public static AttunementContext None { get; } = new AttunementContext(AttunementContextKind.None);
+        public static AttunementContext Forest { get; } = new AttunementContext(AttunementContextKind.Forest);
 
-        public override string ToString() => Kind == AttunementContextKind.Grove ? $"Grove(tier={GroveTier})" : Kind.ToString();
+        public override string ToString() => Kind.ToString();
     }
 
     /// <summary>Per-resolution breakdown of check 2 (E1.12): whether the result came from the
@@ -64,32 +63,32 @@ namespace rfmechanics
     {
         public bool ForestNaturalGround { get; }
         public bool ForestPresence { get; }
-        public int? GroveTier { get; }
         public AttunementContext Context { get; }
         public ForestCensusDiagnostics ForestCensus { get; }
 
-        public AttunementDiagnostics(bool forestNaturalGround, bool forestPresence, int? groveTier, AttunementContext context, ForestCensusDiagnostics forestCensus)
+        public AttunementDiagnostics(bool forestNaturalGround, bool forestPresence, AttunementContext context, ForestCensusDiagnostics forestCensus)
         {
             ForestNaturalGround = forestNaturalGround;
             ForestPresence = forestPresence;
-            GroveTier = groveTier;
             Context = context;
             ForestCensus = forestCensus;
         }
 
-        /// <summary>Placeholder for "the three checks were not run this tick" -- e.g. a
+        /// <summary>Placeholder for "the checks were not run this tick" -- e.g. a
         /// non-elf, which ElfAttunementBehavior skips straight to AttunementContext.None
         /// without spending a GetDiagnostics call at all (the checks themselves are
         /// race-independent -- a non-elf standing on forest-natural ground would pass check 1
         /// same as an elf -- skipping is purely to avoid wasted work on every non-elf player's
-        /// tick, not because the checks would fail for them). Not the same as "all three
-        /// checks ran and failed" -- ForestNaturalGround/ForestPresence read false here as a
-        /// default, not a real evaluation result.</summary>
-        public static AttunementDiagnostics Unevaluated { get; } = new AttunementDiagnostics(false, false, null, AttunementContext.None, ForestCensusDiagnostics.Unevaluated);
+        /// tick, not because the checks would fail for them). Not the same as "both checks ran
+        /// and failed" -- ForestNaturalGround/ForestPresence read false here as a default, not a
+        /// real evaluation result.</summary>
+        public static AttunementDiagnostics Unevaluated { get; } = new AttunementDiagnostics(false, false, AttunementContext.None, ForestCensusDiagnostics.Unevaluated);
     }
 
     /// <summary>Positional cache owned per-entity by ElfAttunementBehavior (E1.10), structured
-    /// generically so Phase 2 can add a CachedGroveTier slot to the same struct. CachedLogCount
+    /// generically so a future grove mod (see notes/race-mechanics/grove-mod-design.md, cut from
+    /// this repo 2026-08-17) could extend it with a grove-tier slot without reshaping this struct.
+    /// CachedLogCount
     /// is not part of the original per-column census record's staleness contract (that's
     /// ForestCensusData's job) -- it exists purely so /rfattune can always show a real log count
     /// without the fast path paying a moddata deserialize just to print one.</summary>
@@ -121,11 +120,12 @@ namespace rfmechanics
     }
 
     /// <summary>
-    /// E1.2's context predicate. GetDiagnostics is the actual source of truth: it evaluates all
-    /// three checks independently (no short-circuiting) so /rfattune can report which check
+    /// E1.2's context predicate. GetDiagnostics is the actual source of truth: it evaluates both
+    /// checks independently (no short-circuiting) so /rfattune can report which check
     /// failed, not just the combined result -- see AttunementDiagnostics. GetAttunementContext
-    /// is a thin convenience wrapper over it for callers who only want the combined
-    /// None/WildForest/Grove(tier) result.
+    /// is a thin convenience wrapper over it for callers who only want the combined None/Forest
+    /// result. (Was a three-check None/WildForest/Grove(tier) predicate before groves were cut
+    /// from the base race on 2026-08-17 -- see notes/race-mechanics/grove-mod-design.md.)
     ///
     /// ElfAttunementBehavior calls GetDiagnostics exactly once per tick and caches the result
     /// (LastDiagnostics) for /rfattune to read instead of re-evaluating -- confirmed still true
@@ -140,7 +140,7 @@ namespace rfmechanics
         public static AttunementContext GetAttunementContext(Entity entity) => GetDiagnostics(entity, AttunementPositionalCache.Empty, out _).Context;
 
         /// <summary>
-        /// E1.6 (and the tick's own source of truth too): evaluates all three checks
+        /// E1.6 (and the tick's own source of truth too): evaluates both checks
         /// independently, without short-circuiting, so a caller can see every check's real
         /// result rather than just the combined context. cache/updatedCache thread an entity's
         /// AttunementPositionalCache (E1.10) through check 2 so a stationary elf in an unchanged
@@ -153,13 +153,10 @@ namespace rfmechanics
         {
             bool ground = IsOnForestNaturalGround(entity);
             bool presence = ResolveForestPresence(entity, cache, out updatedCache, out ForestCensusDiagnostics censusDiag);
-            int? groveTier = ResolveGroveMembership_StubPhase1b(entity);
 
-            AttunementContext context = (!ground || !presence)
-                ? AttunementContext.None
-                : (groveTier.HasValue ? AttunementContext.Grove(groveTier.Value) : AttunementContext.WildForest);
+            AttunementContext context = (!ground || !presence) ? AttunementContext.None : AttunementContext.Forest;
 
-            return new AttunementDiagnostics(ground, presence, groveTier, context, censusDiag);
+            return new AttunementDiagnostics(ground, presence, context, censusDiag);
         }
 
         /// <summary>
@@ -230,12 +227,6 @@ namespace rfmechanics
             updatedCache = AttunementPositionalCache.From(cx, cz, result.IsForest, result.LogCount, result.Generation, now);
             return result.IsForest;
         }
-
-        /// <summary>
-        /// Check 3: STUBBED per the Phase 1a brief. Groves don't exist yet -- always
-        /// "not in a grove" until grove membership tracking is built (Phase 2).
-        /// </summary>
-        private static int? ResolveGroveMembership_StubPhase1b(Entity entity) => null;
     }
 
     /// <summary>

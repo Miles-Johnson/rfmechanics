@@ -170,13 +170,11 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// Single step-toward-target rule that covers all three AttunementContext rules at
-        /// once: gain toward a ceiling while below it, decay toward that same ceiling while
-        /// above it (WildForest's "any value ABOVE WildCeiling decays toward WildCeiling"),
-        /// and decay toward 0 in None (target 0 is always <= current since Attunement is
-        /// clamped to [0,100], so this always takes the decay branch for None). Grove mirrors
-        /// WildForest's shape in anticipation of Phase 1b/2, even though it can't fire yet
-        /// (E1.2's grove check is stubbed).
+        /// Single step-toward-target rule that covers both AttunementContext rules at once:
+        /// gain toward the ceiling while below it, decay toward that same ceiling while above it
+        /// (Forest's "any value ABOVE AttunementCeiling decays toward AttunementCeiling"), and
+        /// decay toward 0 in None (target 0 is always &lt;= current since Attunement is clamped
+        /// to [0,100], so this always takes the decay branch for None).
         /// </summary>
         private void StepAttunement(AttunementContext context, RFMechanicsConfig cfg)
         {
@@ -184,13 +182,9 @@ namespace rfmechanics
             float gainRate;
             switch (context.Kind)
             {
-                case AttunementContextKind.Grove:
-                    target = ResolveGroveCeiling(context.GroveTier, cfg);
-                    gainRate = (float)cfg.AttunementGainRateGrove;
-                    break;
-                case AttunementContextKind.WildForest:
-                    target = (float)cfg.AttunementWildCeiling;
-                    gainRate = (float)cfg.AttunementGainRateWild;
+                case AttunementContextKind.Forest:
+                    target = (float)cfg.AttunementCeiling;
+                    gainRate = (float)cfg.AttunementGainRate;
                     break;
                 default:
                     target = 0f;
@@ -257,28 +251,6 @@ namespace rfmechanics
             if (current < target) return Math.Min(target, current + delta);
             if (current > target) return Math.Max(target, current - delta);
             return current;
-        }
-
-        private bool loggedGroveCeilingFallback;
-
-        /// <summary>Groves don't exist yet (Phase 1b/2) -- E1.2's grove check never returns a
-        /// tier, so this is provably unreachable in Phase 1a. Falls back to WildCeiling so the
-        /// branch is still well-defined, but logs loudly (once per entity, not every tick) if
-        /// it's ever actually hit -- once groves exist, reaching this fallback means a real
-        /// tier-ceiling table is missing, which should look like a bug, not silently read as a
-        /// tuning number (25 is a plausible-looking ceiling for a low grove tier, which is
-        /// exactly what would make this dangerous to leave quiet).</summary>
-        private float ResolveGroveCeiling(int tier, RFMechanicsConfig cfg)
-        {
-            if (!loggedGroveCeilingFallback)
-            {
-                loggedGroveCeilingFallback = true;
-                RFMechanicsModSystem.Api?.Logger.Error(
-                    "[rfmechanics] ElfAttunement: ResolveGroveCeiling reached for grove tier {0} with no real tier-ceiling table -- falling back to AttunementWildCeiling ({1}). This is unreachable in Phase 1a (grove membership is always null); if groves now exist, this is a missing tier table, not a tuning gap.",
-                    tier, cfg.AttunementWildCeiling);
-            }
-
-            return (float)cfg.AttunementWildCeiling;
         }
 
         /// <summary>Deterministic per-entity fraction of one tick interval, used once to seed
