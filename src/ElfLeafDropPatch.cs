@@ -25,11 +25,35 @@ namespace rfmechanics
     /// {wood}" regardless of which grown stage was harvested, matching G1's own recipe wood-
     /// species passthrough shape.
     /// </summary>
-    [HarmonyPatch(typeof(Block), nameof(Block.GetDrops))]
+    [HarmonyPatch]
     public static class ElfLeafDropPatch
     {
         private static bool loggedException = false;
 
+        /// <summary>True for the full duration of a server-side ItemAxe.OnBlockBrokenWith call.
+        /// A held-tool check alone misses leaves broken after the axe's own durability runs out
+        /// mid-sweep (ItemAxe's flag2 gate on wood only -- leaves keep popping regardless), so
+        /// this wraps the whole felling call instead. Client-side calls never touch this: the
+        /// GetDrops postfix below already returns before consulting it off the server side, so
+        /// there's no cross-thread race between the client-prediction and server-authoritative
+        /// calls that both invoke OnBlockBrokenWith.</summary>
+        private static bool inServerAxeFelling = false;
+
+        [HarmonyPatch(typeof(ItemAxe), nameof(ItemAxe.OnBlockBrokenWith))]
+        [HarmonyPrefix]
+        public static void OnBlockBrokenWithPrefix(IWorldAccessor world)
+        {
+            if (world.Side == EnumAppSide.Server) inServerAxeFelling = true;
+        }
+
+        [HarmonyPatch(typeof(ItemAxe), nameof(ItemAxe.OnBlockBrokenWith))]
+        [HarmonyPostfix]
+        public static void OnBlockBrokenWithPostfix(IWorldAccessor world)
+        {
+            if (world.Side == EnumAppSide.Server) inServerAxeFelling = false;
+        }
+
+        [HarmonyPatch(typeof(Block), nameof(Block.GetDrops))]
         [HarmonyPostfix]
         public static void Postfix(
             Block __instance,
@@ -53,12 +77,10 @@ namespace rfmechanics
                 if (world.Side != EnumAppSide.Server)
                     return;
 
-                // Axe tree-felling incidentally breaks every leaf in the canopy via its own BFS
-                // (ItemAxe.FindTree), each call landing here -- appending a full bonus stack per
-                // leaf compounded into dozens of extra drops for one swing. Living harvest (Phase
-                // 4) is the intended better-yield path for elves; axes are deliberately not it.
-                EnumTool? heldTool = byPlayer.InventoryManager?.ActiveHotbarSlot?.Itemstack?.Collectible?.Tool;
-                if (heldTool == EnumTool.Axe)
+                // Axe felling breaks every leaf in the canopy along with the trunk; no bonus for
+                // any of it. Living harvest (Phase 4) is the intended better-yield path for
+                // elves, not axes.
+                if (inServerAxeFelling)
                     return;
 
                 // Material/code gate: leaves-* or leavesbranchy-* only.
