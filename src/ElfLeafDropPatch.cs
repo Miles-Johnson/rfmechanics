@@ -53,6 +53,14 @@ namespace rfmechanics
                 if (world.Side != EnumAppSide.Server)
                     return;
 
+                // Axe tree-felling incidentally breaks every leaf in the canopy via its own BFS
+                // (ItemAxe.FindTree), each call landing here -- appending a full bonus stack per
+                // leaf compounded into dozens of extra drops for one swing. Living harvest (Phase
+                // 4) is the intended better-yield path for elves; axes are deliberately not it.
+                EnumTool? heldTool = byPlayer.InventoryManager?.ActiveHotbarSlot?.Itemstack?.Collectible?.Tool;
+                if (heldTool == EnumTool.Axe)
+                    return;
+
                 // Material/code gate: leaves-* or leavesbranchy-* only.
                 string path = __instance?.Code?.Path;
                 if (path == null)
