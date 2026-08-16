@@ -23,7 +23,10 @@ namespace rfmechanics
     /// <summary>Result of a GetForestPresence call. FromCache=true means the persisted
     /// TTL-fresh record was trusted with no section scan this call -- distinct from the
     /// positional cache (AttunementPositionalCache) one layer up, which can skip even the
-    /// moddata read this result implies.</summary>
+    /// moddata read this result implies. Determined=false means the call could not produce
+    /// a real answer this tick (unloaded column, or a scan that read zero sections) --
+    /// IsForest/LogCount are meaningless placeholders in that case, and callers must branch
+    /// on Determined before trusting them, not infer failure from Timestamp/LogCount.</summary>
     public readonly struct ForestCensusResult
     {
         public bool IsForest { get; }
@@ -31,18 +34,20 @@ namespace rfmechanics
         public long Timestamp { get; }
         public int Generation { get; }
         public bool FromCache { get; }
+        public bool Determined { get; }
 
-        private ForestCensusResult(bool isForest, int logCount, long timestamp, int generation, bool fromCache)
+        private ForestCensusResult(bool isForest, int logCount, long timestamp, int generation, bool fromCache, bool determined)
         {
             IsForest = isForest;
             LogCount = logCount;
             Timestamp = timestamp;
             Generation = generation;
             FromCache = fromCache;
+            Determined = determined;
         }
 
-        public static ForestCensusResult From(bool isForest, int logCount, long timestamp, int generation, bool fromCache)
-            => new ForestCensusResult(isForest, logCount, timestamp, generation, fromCache);
+        public static ForestCensusResult From(bool isForest, int logCount, long timestamp, int generation, bool fromCache, bool determined)
+            => new ForestCensusResult(isForest, logCount, timestamp, generation, fromCache, determined);
     }
 
     /// <summary>
@@ -110,7 +115,7 @@ namespace rfmechanics
             IMapChunk mapChunk = blockAccessor.GetMapChunkAtBlockPos(pos);
             if (mapChunk == null)
             {
-                return ForestCensusResult.From(false, 0, -1, 0, false);
+                return ForestCensusResult.From(false, 0, -1, 0, false, false);
             }
 
             ForestCensusData data = mapChunk.GetModdata<ForestCensusData>(ModDataKey);
@@ -123,7 +128,7 @@ namespace rfmechanics
             {
                 SeedGeneration(cx, cz, data.Generation);
                 bool isForestCached = data.LogCount > cfg.AttunementCensusLogCountThreshold;
-                return ForestCensusResult.From(isForestCached, data.LogCount, data.Timestamp, data.Generation, true);
+                return ForestCensusResult.From(isForestCached, data.LogCount, data.Timestamp, data.Generation, true, true);
             }
 
             // Prefer the in-memory shadow over the persisted value: InvalidateColumn bumps it on
@@ -146,7 +151,7 @@ namespace rfmechanics
                 logger?.Warning(
                     "[rfmechanics] ElfForestCensus scan column ({0},{1}): 0 sections readable in band, skipping persist -- will retry next call",
                     cx, cz);
-                return ForestCensusResult.From(false, 0, -1, generation, false);
+                return ForestCensusResult.From(false, 0, -1, generation, false, false);
             }
 
             var newData = new ForestCensusData { LogCount = logCount, Timestamp = nowMs, Generation = generation };
@@ -163,7 +168,7 @@ namespace rfmechanics
             }
 
             bool isForest = logCount > cfg.AttunementCensusLogCountThreshold;
-            return ForestCensusResult.From(isForest, logCount, nowMs, generation, false);
+            return ForestCensusResult.From(isForest, logCount, nowMs, generation, false, true);
         }
 
         /// <summary>Called only from ElfForestCensusInvalidationPatch on a confirmed log-grown
@@ -240,14 +245,14 @@ namespace rfmechanics
                 if (chunk == null || chunk.Disposed) continue;
 
                 // Data is a raw field, null whenever the chunk is currently packed (compressed
-                // after ~8s untouched -- WorldChunk.TryCommitPackAndFree). Unpack_ReadOnly is the
-                // documented way to guarantee Data is populated before touching it; every vanilla
-                // block accessor calls it first, this scan is column-direct and bypassed that.
-                if (!chunk.Unpack_ReadOnly()) continue;
-
-                // Only counted once a section is confirmed readable -- a null/disposed/packed
-                // section must not count as "examined," or a band that's entirely unreadable
-                // this tick would look identical to a real, successful zero-log scan.
+                // after ~8s untouched -- WorldChunk.TryCommitPackAndFree). Unpack_ReadOnly
+                // guarantees Data is populated either way it returns -- the bool means "was this
+                // call the one that decompressed it" (true) vs. "was already unpacked" (false),
+                // NOT "is it readable." Gating on it (a prior fix) skipped every already-warm
+                // section, which is most sections most of the time a player has been standing
+                // nearby. Vanilla's own AcquireBlockReadLock() calls this and discards the return
+                // value for the same reason -- do the same here.
+                chunk.Unpack_ReadOnly();
                 sectionsExamined++;
 
                 IChunkBlocks blocks = chunk.Data;
