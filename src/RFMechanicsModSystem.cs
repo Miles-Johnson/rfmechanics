@@ -110,6 +110,25 @@ namespace rfmechanics
                     "[rfmechanics] ElfAttunement: AttunementThresholdHysteresis ({0}) does not exceed the worst-case single-tick delta ({1:F3} = max(DecayRate={2}, GainRateGrove={3}, GainRateWild={4}) * TickInterval={5}) -- threshold-crossing events can chatter near a threshold. Raise AttunementThresholdHysteresis above {1:F3}.",
                     cfg.AttunementThresholdHysteresis, maxTickDelta, cfg.AttunementDecayRate, cfg.AttunementGainRateGrove, cfg.AttunementGainRateWild, cfg.AttunementTickInterval);
             }
+
+            // Phase 1b: an inverted/empty band silently under-scans (or never scans) instead of
+            // throwing, so this would otherwise surface as "check 2 never reads WildForest" with
+            // no obvious cause.
+            if (cfg.AttunementCensusSurfaceBandBelow < 0 || cfg.AttunementCensusSurfaceBandAbove < 0)
+            {
+                api.Logger.Warning(
+                    "[rfmechanics] ElfAttunement: AttunementCensusSurfaceBandBelow ({0}) and AttunementCensusSurfaceBandAbove ({1}) must both be >= 0 -- a negative band inverts or shrinks the census scan range.",
+                    cfg.AttunementCensusSurfaceBandBelow, cfg.AttunementCensusSurfaceBandAbove);
+            }
+
+            // A threshold <= 0 makes every censused column read as forest unconditionally --
+            // technically well-defined, but almost certainly not what a retune intended.
+            if (cfg.AttunementCensusLogCountThreshold <= 0)
+            {
+                api.Logger.Warning(
+                    "[rfmechanics] ElfAttunement: AttunementCensusLogCountThreshold ({0}) is <= 0 -- every censused column will read as forest-present unconditionally.",
+                    cfg.AttunementCensusLogCountThreshold);
+            }
         }
 
         // ── Curve helpers (shared by patch and command) ──

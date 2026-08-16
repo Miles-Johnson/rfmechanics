@@ -144,12 +144,22 @@ namespace rfmechanics
     public static class ElfAttunementBlockWhitelist
     {
         private static HashSet<int> resolvedIds;
+        private static HashSet<int> resolvedLogGrownIds;
 
+        /// <summary>Single pass over api.World.Blocks builds both the forest-natural-ground set
+        /// (AttunementForestBlockCodePrefixes) and the census log-grown set
+        /// (AttunementCensusLogCodePrefixes, Phase 1b) -- deliberately one scan, not two, per
+        /// E1.8's brief. The two prefix lists are intentionally different (forest-natural ground
+        /// includes leaves/moss/soil/placed logs; the census counts only naturally-grown,
+        /// still-standing trunks), so they get independent HashSets from the same loop.</summary>
         public static void Resolve(ICoreAPI api, RFMechanicsConfig cfg)
         {
             string[] prefixes = cfg.AttunementForestBlockCodePrefixes;
+            string[] logPrefixes = cfg.AttunementCensusLogCodePrefixes;
             var ids = new HashSet<int>();
+            var logIds = new HashSet<int>();
             var matched = new bool[prefixes.Length];
+            var logMatched = new bool[logPrefixes.Length];
 
             foreach (Block block in api.World.Blocks)
             {
@@ -163,6 +173,15 @@ namespace rfmechanics
                         matched[i] = true;
                     }
                 }
+
+                for (int i = 0; i < logPrefixes.Length; i++)
+                {
+                    if (block.Code.Path.StartsWith(logPrefixes[i]))
+                    {
+                        logIds.Add(block.Id);
+                        logMatched[i] = true;
+                    }
+                }
             }
 
             for (int i = 0; i < prefixes.Length; i++)
@@ -173,10 +192,22 @@ namespace rfmechanics
                 }
             }
 
+            for (int i = 0; i < logPrefixes.Length; i++)
+            {
+                if (!logMatched[i])
+                {
+                    api.Logger.Warning("[rfmechanics] ElfAttunement: census log code prefix '{0}' matched no registered block -- typo, or the block was removed/renamed upstream?", logPrefixes[i]);
+                }
+            }
+
             resolvedIds = ids;
-            api.Logger.Notification("[rfmechanics] ElfAttunement forest block whitelist resolved: {0} block IDs across {1} configured prefixes.", ids.Count, prefixes.Length);
+            resolvedLogGrownIds = logIds;
+            api.Logger.Notification("[rfmechanics] ElfAttunement forest block whitelist resolved: {0} block IDs across {1} configured prefixes ({2} log-grown IDs across {3} census prefixes).",
+                ids.Count, prefixes.Length, logIds.Count, logPrefixes.Length);
         }
 
         public static bool IsForestNatural(int blockId) => resolvedIds != null && resolvedIds.Contains(blockId);
+
+        public static bool IsLogGrown(int blockId) => resolvedLogGrownIds != null && resolvedLogGrownIds.Contains(blockId);
     }
 }

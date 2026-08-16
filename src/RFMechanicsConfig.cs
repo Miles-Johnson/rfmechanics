@@ -167,6 +167,48 @@ public class RFMechanicsConfig
     /// RFMechanicsModSystem.ValidateAttunementConfig checks this bound at load time and warns if a retune violates it silently.</summary>
     public double AttunementThresholdHysteresis { get; set; } = 2.5;
 
+    // ── Elf attunement forest census (Phase 1b) ──
+
+    /// <summary>Block Code.Path prefixes (StartsWith) counting as a living, still-standing tree
+    /// for the per-column forest census (ElfForestCensus). Deliberately separate from
+    /// AttunementForestBlockCodePrefixes above: that whitelist includes "log-placed-" (cut/placed
+    /// logs, fine as ground cover underfoot) plus leaves/moss/soil, none of which should count as
+    /// a living tree for the census. Only naturally-grown, still-standing trunks count here.</summary>
+    public string[] AttunementCensusLogCodePrefixes { get; set; } = new[] { "log-grown-" };
+
+    /// <summary>Column scan-band floor, in blocks below min(WorldGenTerrainHeightMap,
+    /// RainHeightMap) at each column position. Deliberately uses the min of the two heightmaps,
+    /// not WorldGenTerrainHeightMap alone: the latter is frozen pre-vegetation and stable, but
+    /// also pre-terrain-modification, and would miss a forested valley floor sitting beside a
+    /// worldgen ridge. A band that misses trunks under-counts silently, the worst failure mode
+    /// available here, so the wider/safer of the two floors wins.</summary>
+    public int AttunementCensusSurfaceBandBelow { get; set; } = 4;
+
+    /// <summary>Column scan-band ceiling, in blocks above RainHeightMap at each column position.
+    /// Reaches well above the rain-blocking surface to capture trunk/canopy height, not just the
+    /// ground-level footprint.</summary>
+    public int AttunementCensusSurfaceBandAbove { get; set; } = 24;
+
+    /// <summary>Log count (strictly above) at which a column's census reads as forest-present.
+    /// Roughly more than one trunk's worth, so a lone sapling doesn't qualify. No maturity/age
+    /// gate exists -- see ElfAttunementContext's check-2 doc comment for why.</summary>
+    public int AttunementCensusLogCountThreshold { get; set; } = 12;
+
+    /// <summary>Per-column census freshness window, in milliseconds, before ElfForestCensus.
+    /// GetForestPresence re-scans instead of trusting the persisted LogCount. Eager invalidation
+    /// on felling (ElfForestCensusInvalidationPatch) punches through this early by marking the
+    /// persisted record as needing a rescan regardless of age -- see ElfForestCensus.
+    /// InvalidateColumn.</summary>
+    public int AttunementCensusTtlMs { get; set; } = 300000;
+
+    /// <summary>Logs elapsed scan time, resulting log count, and prefilter-hit/total-sections
+    /// counts every time ElfForestCensus actually runs a section scan (never on a TTL-fresh or
+    /// positional-cache hit, since those skip the scan entirely). Default on for this phase to
+    /// validate the palette prefilter's real hit rate against production terrain -- the ratio is
+    /// what separates "band too wide, prefilter missing" from "band right, per-cell scan is the
+    /// real cost" once real numbers come in.</summary>
+    public bool AttunementCensusLogTiming { get; set; } = true;
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>
