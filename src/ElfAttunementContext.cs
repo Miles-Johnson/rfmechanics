@@ -180,12 +180,21 @@ namespace rfmechanics
         /// <summary>
         /// Check 2 (Phase 1b, real): resolves via the entity's positional cache first --
         /// PeekGeneration is a dictionary read, never a moddata deserialize, so a stationary elf
-        /// in an unchanged column costs only a coordinate+generation compare. On a coordinate or
-        /// generation mismatch, falls through to ElfForestCensus.GetForestPresence (the real,
-        /// TTL-aware, possibly-scanning path) and refreshes the cache from its result. No
-        /// maturity/tree-age gate: design docs reference one, but no such check exists anywhere
-        /// in this codebase and nothing in the log-grown block data encodes age or size --
-        /// deliberate deferral, not an oversight, unchanged from the Phase 1a stub's own note.
+        /// in an unchanged column costs only a coordinate+generation+age compare. The fast path
+        /// also carries its own staleness bound (reuses AttunementCensusTtlMs -- same wall-clock
+        /// origin as the moddata layer's own TTL, since both are stamped from the same `now` at
+        /// write time, so the two layers go stale together instead of the cache outliving the
+        /// record it mirrors). Without this, a column that's never invalidated (no felling) never
+        /// re-consults the census for a stationary elf, no matter how long AttunementCensusTtlMs
+        /// is set to -- FIX (Phase 1b diagnostic): the fast path had no time bound at all. On a
+        /// coordinate, generation, or age mismatch, falls through to
+        /// ElfForestCensus.GetForestPresence (the real, TTL-aware, possibly-scanning path) and
+        /// refreshes the cache from its result. Generation punch-through (felling) still
+        /// short-circuits immediately regardless of age, since it's checked as part of the same
+        /// condition. No maturity/tree-age gate: design docs reference one, but no such check
+        /// exists anywhere in this codebase and nothing in the log-grown block data encodes age or
+        /// size -- deliberate deferral, not an oversight, unchanged from the Phase 1a stub's own
+        /// note.
         /// </summary>
         private static bool ResolveForestPresence(Entity entity, AttunementPositionalCache cache, out AttunementPositionalCache updatedCache, out ForestCensusDiagnostics diag)
         {
@@ -193,16 +202,20 @@ namespace rfmechanics
             int cx = ElfForestCensus.ToChunkCoord(pos.X);
             int cz = ElfForestCensus.ToChunkCoord(pos.Z);
             int currentGeneration = ElfForestCensus.PeekGeneration(cx, cz);
+            var cfg = RFMechanicsModSystem.Config;
+            long now = entity.World.ElapsedMilliseconds;
 
-            if (cache.HasValue && cache.ChunkX == cx && cache.ChunkZ == cz && cache.CachedGeneration == currentGeneration)
+            bool cacheFresh = cache.HasValue && cache.ChunkX == cx && cache.ChunkZ == cz
+                && cache.CachedGeneration == currentGeneration
+                && (now - cache.LastCheckedTimeMs) < cfg.AttunementCensusTtlMs;
+
+            if (cacheFresh)
             {
                 updatedCache = cache;
                 diag = new ForestCensusDiagnostics(cache.CachedLogCount, cache.LastCheckedTimeMs, true, cache.CachedGeneration, currentGeneration);
                 return cache.CachedForestPresence;
             }
 
-            var cfg = RFMechanicsModSystem.Config;
-            long now = entity.World.ElapsedMilliseconds;
             ForestCensusResult result = ElfForestCensus.GetForestPresence(entity.World.BlockAccessor, pos, now, cfg, RFMechanicsModSystem.Api?.Logger);
 
             updatedCache = AttunementPositionalCache.From(cx, cz, result.IsForest, result.LogCount, result.Generation, now);
