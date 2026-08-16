@@ -234,7 +234,8 @@ namespace rfmechanics
                     }
                     else
                     {
-                        diag = ElfAttunementContext.GetDiagnostics(entity);
+                        diag = ElfAttunementContext.GetDiagnostics(entity, behavior.ForestCache, out var updatedCache);
+                        behavior.ForestCache = updatedCache; // keeps the cache warm even when called off the tick path
                         diagSource = cfg.EnableElfAttunement ? "live (not cached yet -- not currently an elf)" : "live (EnableElfAttunement=false, tick not running)";
                     }
 

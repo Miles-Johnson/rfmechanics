@@ -35,6 +35,30 @@ namespace rfmechanics
         public override string ToString() => Kind == AttunementContextKind.Grove ? $"Grove(tier={GroveTier})" : Kind.ToString();
     }
 
+    /// <summary>Per-resolution breakdown of check 2 (E1.12): whether the result came from the
+    /// TTL-fresh persisted record or the entity's own positional cache, plus enough of the
+    /// generation bookkeeping to tell "census wrong" apart from "census stale" apart from "cache
+    /// didn't invalidate."</summary>
+    public readonly struct ForestCensusDiagnostics
+    {
+        public int LogCount { get; }
+        public long LastCheckedTimeMs { get; }
+        public bool FromCache { get; }
+        public int CachedGeneration { get; }
+        public int CurrentGeneration { get; }
+
+        public ForestCensusDiagnostics(int logCount, long lastCheckedTimeMs, bool fromCache, int cachedGeneration, int currentGeneration)
+        {
+            LogCount = logCount;
+            LastCheckedTimeMs = lastCheckedTimeMs;
+            FromCache = fromCache;
+            CachedGeneration = cachedGeneration;
+            CurrentGeneration = currentGeneration;
+        }
+
+        public static ForestCensusDiagnostics Unevaluated { get; } = new ForestCensusDiagnostics(0, -1, false, 0, 0);
+    }
+
     /// <summary>Per-check breakdown for /rfattune (E1.6) -- see ElfAttunementContext.GetDiagnostics.</summary>
     public readonly struct AttunementDiagnostics
     {
@@ -42,13 +66,15 @@ namespace rfmechanics
         public bool ForestPresence { get; }
         public int? GroveTier { get; }
         public AttunementContext Context { get; }
+        public ForestCensusDiagnostics ForestCensus { get; }
 
-        public AttunementDiagnostics(bool forestNaturalGround, bool forestPresence, int? groveTier, AttunementContext context)
+        public AttunementDiagnostics(bool forestNaturalGround, bool forestPresence, int? groveTier, AttunementContext context, ForestCensusDiagnostics forestCensus)
         {
             ForestNaturalGround = forestNaturalGround;
             ForestPresence = forestPresence;
             GroveTier = groveTier;
             Context = context;
+            ForestCensus = forestCensus;
         }
 
         /// <summary>Placeholder for "the three checks were not run this tick" -- e.g. a
@@ -59,7 +85,39 @@ namespace rfmechanics
         /// tick, not because the checks would fail for them). Not the same as "all three
         /// checks ran and failed" -- ForestNaturalGround/ForestPresence read false here as a
         /// default, not a real evaluation result.</summary>
-        public static AttunementDiagnostics Unevaluated { get; } = new AttunementDiagnostics(false, false, null, AttunementContext.None);
+        public static AttunementDiagnostics Unevaluated { get; } = new AttunementDiagnostics(false, false, null, AttunementContext.None, ForestCensusDiagnostics.Unevaluated);
+    }
+
+    /// <summary>Positional cache owned per-entity by ElfAttunementBehavior (E1.10), structured
+    /// generically so Phase 2 can add a CachedGroveTier slot to the same struct. CachedLogCount
+    /// is not part of the original per-column census record's staleness contract (that's
+    /// ForestCensusData's job) -- it exists purely so /rfattune can always show a real log count
+    /// without the fast path paying a moddata deserialize just to print one.</summary>
+    public readonly struct AttunementPositionalCache
+    {
+        public bool HasValue { get; }
+        public int ChunkX { get; }
+        public int ChunkZ { get; }
+        public bool CachedForestPresence { get; }
+        public int CachedLogCount { get; }
+        public int CachedGeneration { get; }
+        public long LastCheckedTimeMs { get; }
+
+        private AttunementPositionalCache(bool hasValue, int chunkX, int chunkZ, bool cachedForestPresence, int cachedLogCount, int cachedGeneration, long lastCheckedTimeMs)
+        {
+            HasValue = hasValue;
+            ChunkX = chunkX;
+            ChunkZ = chunkZ;
+            CachedForestPresence = cachedForestPresence;
+            CachedLogCount = cachedLogCount;
+            CachedGeneration = cachedGeneration;
+            LastCheckedTimeMs = lastCheckedTimeMs;
+        }
+
+        public static AttunementPositionalCache Empty { get; } = new AttunementPositionalCache(false, 0, 0, false, 0, 0, -1);
+
+        public static AttunementPositionalCache From(int chunkX, int chunkZ, bool forestPresence, int logCount, int generation, long checkedAtMs)
+            => new AttunementPositionalCache(true, chunkX, chunkZ, forestPresence, logCount, generation, checkedAtMs);
     }
 
     /// <summary>
@@ -83,31 +141,38 @@ namespace rfmechanics
     /// </summary>
     public static class ElfAttunementContext
     {
-        public static AttunementContext GetAttunementContext(Entity entity) => GetDiagnostics(entity).Context;
+        public static AttunementContext GetAttunementContext(Entity entity) => GetDiagnostics(entity, AttunementPositionalCache.Empty, out _).Context;
 
         /// <summary>
-        /// E1.6 (and, since the caching fix above, the tick's own source of truth too):
-        /// evaluates all three checks independently, without short-circuiting, so a caller can
-        /// see every check's real result rather than just the combined context.
+        /// E1.6 (and the tick's own source of truth too): evaluates all three checks
+        /// independently, without short-circuiting, so a caller can see every check's real
+        /// result rather than just the combined context. cache/updatedCache thread an entity's
+        /// AttunementPositionalCache (E1.10) through check 2 so a stationary elf in an unchanged
+        /// column costs a coordinate+generation compare, not a real census consult -- callers
+        /// with no cache of their own (GetAttunementContext above) pass
+        /// AttunementPositionalCache.Empty and discard the result, which is equivalent to always
+        /// paying check 2 fresh.
         /// </summary>
-        public static AttunementDiagnostics GetDiagnostics(Entity entity)
+        public static AttunementDiagnostics GetDiagnostics(Entity entity, AttunementPositionalCache cache, out AttunementPositionalCache updatedCache)
         {
             bool ground = IsOnForestNaturalGround(entity);
-            bool presence = HasNearbyForestPresence_StubPhase1b(entity);
+            bool presence = ResolveForestPresence(entity, cache, out updatedCache, out ForestCensusDiagnostics censusDiag);
             int? groveTier = ResolveGroveMembership_StubPhase1b(entity);
 
             AttunementContext context = (!ground || !presence)
                 ? AttunementContext.None
                 : (groveTier.HasValue ? AttunementContext.Grove(groveTier.Value) : AttunementContext.WildForest);
 
-            return new AttunementDiagnostics(ground, presence, groveTier, context);
+            return new AttunementDiagnostics(ground, presence, groveTier, context, censusDiag);
         }
 
         /// <summary>
         /// Check 1 (real, not stubbed): the block underfoot (one below the entity's feet
         /// position) is on the config-backed forest-natural whitelist, resolved once at world
         /// load into a HashSet&lt;int&gt; by ElfAttunementBlockWhitelist -- never a Code.Path
-        /// scan per call.
+        /// scan per call. Evaluates fresh every call by design -- a player changes underfoot
+        /// block far more often than they cross a chunk boundary, so unlike check 2 this can't
+        /// be chunk-gated without a correctness regression.
         /// </summary>
         private static bool IsOnForestNaturalGround(Entity entity)
         {
@@ -117,19 +182,41 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// Check 2: STUBBED per the Phase 1a brief. Deliberately hardcoded true, not a
-        /// temporary block sweep -- Phase 1b replaces this with the real forest census. Also
-        /// where a "mature tree" condition would eventually live: design docs reference a
-        /// mature-tree gate and a pre-existing tree-age check, but no such check exists
-        /// anywhere in this codebase and nothing in the log-grown block data encodes age or
-        /// size. Phase 1 ships with NO maturity condition -- any grown log counts once the
-        /// census (Phase 1b) lands. Deliberate deferral, not an oversight.
+        /// Check 2 (Phase 1b, real): resolves via the entity's positional cache first --
+        /// PeekGeneration is a dictionary read, never a moddata deserialize, so a stationary elf
+        /// in an unchanged column costs only a coordinate+generation compare. On a coordinate or
+        /// generation mismatch, falls through to ElfForestCensus.GetForestPresence (the real,
+        /// TTL-aware, possibly-scanning path) and refreshes the cache from its result. No
+        /// maturity/tree-age gate: design docs reference one, but no such check exists anywhere
+        /// in this codebase and nothing in the log-grown block data encodes age or size --
+        /// deliberate deferral, not an oversight, unchanged from the Phase 1a stub's own note.
         /// </summary>
-        private static bool HasNearbyForestPresence_StubPhase1b(Entity entity) => true;
+        private static bool ResolveForestPresence(Entity entity, AttunementPositionalCache cache, out AttunementPositionalCache updatedCache, out ForestCensusDiagnostics diag)
+        {
+            BlockPos pos = entity.Pos.AsBlockPos;
+            int cx = ElfForestCensus.ToChunkCoord(pos.X);
+            int cz = ElfForestCensus.ToChunkCoord(pos.Z);
+            int currentGeneration = ElfForestCensus.PeekGeneration(cx, cz);
+
+            if (cache.HasValue && cache.ChunkX == cx && cache.ChunkZ == cz && cache.CachedGeneration == currentGeneration)
+            {
+                updatedCache = cache;
+                diag = new ForestCensusDiagnostics(cache.CachedLogCount, cache.LastCheckedTimeMs, true, cache.CachedGeneration, currentGeneration);
+                return cache.CachedForestPresence;
+            }
+
+            var cfg = RFMechanicsModSystem.Config;
+            long now = entity.World.ElapsedMilliseconds;
+            ForestCensusResult result = ElfForestCensus.GetForestPresence(entity.World.BlockAccessor, pos, now, cfg, RFMechanicsModSystem.Api?.Logger);
+
+            updatedCache = AttunementPositionalCache.From(cx, cz, result.IsForest, result.LogCount, result.Generation, now);
+            diag = new ForestCensusDiagnostics(result.LogCount, result.Timestamp, result.FromCache, currentGeneration, result.Generation);
+            return result.IsForest;
+        }
 
         /// <summary>
         /// Check 3: STUBBED per the Phase 1a brief. Groves don't exist yet -- always
-        /// "not in a grove" until grove membership tracking is built (Phase 1b/2).
+        /// "not in a grove" until grove membership tracking is built (Phase 2).
         /// </summary>
         private static int? ResolveGroveMembership_StubPhase1b(Entity entity) => null;
     }

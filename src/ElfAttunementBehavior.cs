@@ -84,6 +84,14 @@ namespace rfmechanics
         /// non-short-circuited tick paying it every 2s for every elf is not).</summary>
         public AttunementDiagnostics LastDiagnostics { get; private set; } = AttunementDiagnostics.Unevaluated;
 
+        /// <summary>E1.10: this entity's cached column coordinate/generation/forest-presence
+        /// result, threaded through ElfAttunementContext.GetDiagnostics every tick. `internal
+        /// set` (not private) so RFMechanicsModSystem's /rfattune fallback branch -- same
+        /// assembly -- can write the refreshed cache back after its own off-tick
+        /// GetDiagnostics call, keeping both call sites on one cache instead of a second,
+        /// disconnected one.</summary>
+        public AttunementPositionalCache ForestCache { get; internal set; } = AttunementPositionalCache.Empty;
+
         public ElfAttunementBehavior(Entity entity) : base(entity) { }
 
         public override string PropertyName() => "rfelfattunement";
@@ -127,9 +135,15 @@ namespace rfmechanics
 
             RefreshElfCache();
 
-            LastDiagnostics = IsElfCached
-                ? ElfAttunementContext.GetDiagnostics(entity)
-                : AttunementDiagnostics.Unevaluated;
+            if (IsElfCached)
+            {
+                LastDiagnostics = ElfAttunementContext.GetDiagnostics(entity, ForestCache, out var updatedCache);
+                ForestCache = updatedCache;
+            }
+            else
+            {
+                LastDiagnostics = AttunementDiagnostics.Unevaluated;
+            }
 
             StepAttunement(LastDiagnostics.Context, cfg);
         }
