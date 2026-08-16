@@ -73,6 +73,15 @@ namespace rfmechanics
         /// instead of re-deriving it.</summary>
         public bool IsElfCached { get; private set; }
 
+        /// <summary>E3.4 gate: true once liveAttunement is at/above
+        /// RFMechanicsConfig.LeafStandingAttunementThreshold, false below it. Set inline inside
+        /// EvaluateThresholds -- the same Schmitt-trigger crossing detection that raises
+        /// ThresholdCrossed for this threshold, so this is crossing-driven exactly like the
+        /// event, never a per-tick re-check of liveAttunement against the threshold.
+        /// BranchyLeavesPassthroughPatch reads this field directly on its physics-substep hot
+        /// path, alongside IsElfCached -- never Attunement, never the trait system.</summary>
+        public bool LeafStandingActive { get; private set; }
+
         /// <summary>The full per-check breakdown from this entity's last tick, computed once
         /// per tick via ElfAttunementContext.GetDiagnostics and reused for both the tick's own
         /// stepping (context = LastDiagnostics.Context) and /rfattune's dump -- avoids
@@ -237,6 +246,7 @@ namespace rfmechanics
                 if (nowActive == wasActive) continue;
 
                 activeThresholds[i] = nowActive;
+                if (t == cfg.LeafStandingAttunementThreshold) LeafStandingActive = nowActive;
                 ThresholdCrossed?.Invoke(entity, t, nowActive, liveAttunement);
             }
         }

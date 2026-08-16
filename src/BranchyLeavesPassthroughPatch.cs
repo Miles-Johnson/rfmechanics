@@ -19,6 +19,18 @@ namespace rfmechanics
     /// reentrancy within a thread's tick. Filter runs as a postfix on
     /// GenerateCollisionBoxList, strictly after CollisionBoxList is populated and before
     /// ApplyTerrainCollision's push-out.
+    ///
+    /// E3.4 (canopy standing at 25): a scaffolding-mod reference (third-party, decompiled --
+    /// see notes/race-mechanics/elf-scaffolding-diagnostic-findings.md) was evaluated and
+    /// rejected as a template. It injects whole-block boxes gated on vanilla's ladder-climbing
+    /// control state, which doesn't guarantee horizontal passthrough and has no attunement gate
+    /// to borrow. What's implemented here instead is a same-postfix, removal-only extension:
+    /// below LeafStandingAttunementThreshold every branchy box is stripped as before; at/above
+    /// it, only boxes whose top is strictly above the entity's foot Y are stripped. This is an
+    /// exclusion, not a selection -- there's no threshold to cross and therefore nothing to
+    /// debounce, since push-out physics always rests the entity exactly on top of whichever box
+    /// currently supports it (that box's Y2 == footY, never &gt; footY), so it's never the one
+    /// a jump or a step strips.
     /// </summary>
     [HarmonyPatch]
     public static class BranchyLeavesPassthroughPatch
@@ -77,21 +89,20 @@ namespace rfmechanics
 
                 if (!testerEntity.TryGetValue(__instance, out Entity? entity)) return;
 
-                // No class = not an elf; overrides HasTrait's null-class-returns-true default.
-                if (entity is not EntityPlayer player) return;
+                // IsElfCached already applies the exact EntityPlayer/characterClass-null/HasTrait
+                // guard chain RefreshElfCache runs on its own slow tick -- reading it here (a
+                // field on the entity's own attached behavior) replaces walking the trait system
+                // on this per-substep hot path.
+                var behavior = entity.GetBehavior<ElfAttunementBehavior>();
+                if (behavior == null || !behavior.IsElfCached) return;
 
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass)) return;
+                // Matches how CollisionTester.ApplyTerrainCollision itself derives the entity's
+                // world-space box (entityBox.SetAndTranslate(entity.CollisionBox, pos.X, pos.Y, pos.Z))
+                // -- CollisionBox.Y1 is 0 for players via Entity.SetCollisionBox, but add it
+                // rather than assume, since that's what "foot level" means to the engine itself.
+                double footY = entity.Pos.Y + entity.CollisionBox.Y1;
 
-                IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null) return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null) return;
-
-                if (!charSys.HasTrait(iplayer, cfg.ElfTraitCode)) return;
-
-                FilterBranchyLeaves(__instance.CollisionBoxList);
+                FilterBranchyLeaves(__instance.CollisionBoxList, behavior.LeafStandingActive, footY);
             }
             catch (Exception ex)
             {
@@ -110,15 +121,22 @@ namespace rfmechanics
         /// through the existing object at the destination slot -- copying the reference itself
         /// would alias two slots and a later in-place mutation would silently corrupt both
         /// (observed in-game as falling through solid ground after passing through branchy leaves).
+        ///
+        /// retainFootSupport false: unchanged E3.3 behaviour, every branchy box stripped.
+        /// retainFootSupport true (E3.4): a branchy box is stripped only if its world-space top
+        /// (cuboids[read].Y2) is strictly above footY -- boxes at or below foot level are always
+        /// kept, so horizontal passthrough at body height never regresses and the box a resting
+        /// or landing elf is standing on (Y2 == footY exactly, once push-out has resolved) is
+        /// never the one removed.
         /// </summary>
-        private static void FilterBranchyLeaves(CachedCuboidListFaster list)
+        private static void FilterBranchyLeaves(CachedCuboidListFaster list, bool retainFootSupport, double footY)
         {
             int write = 0;
             for (int read = 0; read < list.Count; read++)
             {
                 Block block = list.blocks[read];
                 bool isBranchy = block?.Code?.Path != null && block.Code.Path.Contains("branchy");
-                if (isBranchy) continue;
+                if (isBranchy && (!retainFootSupport || list.cuboids[read].Y2 > footY)) continue;
 
                 if (write != read)
                 {

@@ -189,7 +189,10 @@ namespace rfmechanics
             // Server-only: ElfAttunementBehavior's tick never runs client-side, so only the server needs the resolved whitelist.
             if (config != null) ElfAttunementBlockWhitelist.Resolve(api, config);
 
-            // Logging subscriber only -- no gameplay effects exist yet.
+            // Logging only. E3.4's leaf-standing gate (LeafStandingActive) is not maintained
+            // here -- it's set inline inside ElfAttunementBehavior.EvaluateThresholds, the same
+            // crossing detection that raises this event, so BranchyLeavesPassthroughPatch's
+            // per-substep read never depends on subscriber registration order at mod start.
             ElfAttunementBehavior.ThresholdCrossed += (entity, threshold, active, value) =>
             {
                 api.Logger.Notification("[rfmechanics] ElfAttunement threshold {0} {1} for entity {2} (value={3:F2})",

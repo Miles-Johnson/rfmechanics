@@ -63,6 +63,13 @@ public class RFMechanicsConfig
     /// <summary>Master toggle for the branchy-leaves collision passthrough.</summary>
     public bool EnableBranchyLeavesPassthrough { get; set; } = true;
 
+    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
+    /// which BranchyLeavesPassthroughPatch retains the branchy-leaf box supporting an Elf's
+    /// feet instead of stripping every branchy box outright -- E3.4. Below this threshold,
+    /// behavior is unchanged from E3.3: every branchy box is stripped, full passthrough, no
+    /// standing.</summary>
+    public int LeafStandingAttunementThreshold { get; set; } = 25;
+
     // ── Tree proximity speed (Elf) ──
 
     /// <summary>Master toggle for the near-trees walkspeed bonus.</summary>
