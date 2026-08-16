@@ -66,10 +66,10 @@ namespace rfmechanics
                 if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
                     return;
 
-                if (player.SidedPos.Motion.Y > 0)
+                if (player.Pos.Motion.Y > 0)
                 {
                     float factor = (float)(1.0 + cfg.ClimbSpeedFactor);
-                    player.SidedPos.Motion.Y *= factor;
+                    player.Pos.Motion.Y *= factor;
                 }
             }
             catch (Exception ex)
