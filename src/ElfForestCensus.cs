@@ -137,6 +137,18 @@ namespace rfmechanics
             int logCount = ScanColumn(blockAccessor, mapChunk, cx, cz, cfg, out int sectionsExamined, out int sectionsPrefilterHit);
             sw?.Stop();
 
+            // sectionsExamined counts sections actually unpacked and read, not sections attempted --
+            // a band that's entirely packed/disposed/unreadable this tick reads 0 here even though
+            // the band itself is non-degenerate. That 0 is "could not read," not "no logs," and must
+            // not be persisted as if it were a real census: the caller retries next call instead.
+            if (sectionsExamined == 0)
+            {
+                logger?.Warning(
+                    "[rfmechanics] ElfForestCensus scan column ({0},{1}): 0 sections readable in band, skipping persist -- will retry next call",
+                    cx, cz);
+                return ForestCensusResult.From(false, 0, -1, generation, false);
+            }
+
             var newData = new ForestCensusData { LogCount = logCount, Timestamp = nowMs, Generation = generation };
             mapChunk.SetModdata(ModDataKey, newData);
             mapChunk.MarkDirty();
@@ -224,7 +236,6 @@ namespace rfmechanics
 
             for (int cy = chunkYMin; cy <= chunkYMax; cy++)
             {
-                sectionsExamined++;
                 IWorldChunk chunk = blockAccessor.GetChunk(cx, cy, cz);
                 if (chunk == null || chunk.Disposed) continue;
 
@@ -233,6 +244,11 @@ namespace rfmechanics
                 // documented way to guarantee Data is populated before touching it; every vanilla
                 // block accessor calls it first, this scan is column-direct and bypassed that.
                 if (!chunk.Unpack_ReadOnly()) continue;
+
+                // Only counted once a section is confirmed readable -- a null/disposed/packed
+                // section must not count as "examined," or a band that's entirely unreadable
+                // this tick would look identical to a real, successful zero-log scan.
+                sectionsExamined++;
 
                 IChunkBlocks blocks = chunk.Data;
                 fuzzyIds.Clear();
