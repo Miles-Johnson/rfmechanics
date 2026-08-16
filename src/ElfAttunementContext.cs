@@ -181,20 +181,18 @@ namespace rfmechanics
         /// Check 2 (Phase 1b, real): resolves via the entity's positional cache first --
         /// PeekGeneration is a dictionary read, never a moddata deserialize, so a stationary elf
         /// in an unchanged column costs only a coordinate+generation+age compare. The fast path
-        /// also carries its own staleness bound (reuses AttunementCensusTtlMs -- same wall-clock
-        /// origin as the moddata layer's own TTL, since both are stamped from the same `now` at
-        /// write time, so the two layers go stale together instead of the cache outliving the
-        /// record it mirrors). Without this, a column that's never invalidated (no felling) never
-        /// re-consults the census for a stationary elf, no matter how long AttunementCensusTtlMs
-        /// is set to -- FIX (Phase 1b diagnostic): the fast path had no time bound at all. On a
-        /// coordinate, generation, or age mismatch, falls through to
-        /// ElfForestCensus.GetForestPresence (the real, TTL-aware, possibly-scanning path) and
-        /// refreshes the cache from its result. Generation punch-through (felling) still
-        /// short-circuits immediately regardless of age, since it's checked as part of the same
-        /// condition. No maturity/tree-age gate: design docs reference one, but no such check
-        /// exists anywhere in this codebase and nothing in the log-grown block data encodes age or
-        /// size -- deliberate deferral, not an oversight, unchanged from the Phase 1a stub's own
-        /// note.
+        /// carries its own staleness bound (reuses AttunementCensusTtlMs) so a column that's never
+        /// felled still gets re-consulted eventually. On a coordinate, generation, or age
+        /// mismatch, falls through to ElfForestCensus.GetForestPresence and refreshes the cache,
+        /// stamping LastCheckedTimeMs at `now` -- not at the moddata record's own Timestamp, which
+        /// on a moddata cache-hit can already be up to Ttl old. The two layers' windows stack
+        /// rather than share an origin: worst-case observed staleness is just under 2x
+        /// AttunementCensusTtlMs, not 1x. Self-heals every cycle (once real elapsed time since the
+        /// actual scan exceeds Ttl, the moddata check forces a rescan), so this doesn't drift
+        /// indefinitely -- acceptable at attunement's timescale, just not free of the 2x bound. No
+        /// maturity/tree-age gate: design docs reference one, but no such check exists anywhere in
+        /// this codebase and nothing in the log-grown block data encodes age or size -- deliberate
+        /// deferral, not an oversight, unchanged from the Phase 1a stub's own note.
         /// </summary>
         private static bool ResolveForestPresence(Entity entity, AttunementPositionalCache cache, out AttunementPositionalCache updatedCache, out ForestCensusDiagnostics diag)
         {
