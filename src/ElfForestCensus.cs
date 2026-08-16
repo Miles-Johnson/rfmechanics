@@ -205,6 +205,12 @@ namespace rfmechanics
                 IWorldChunk chunk = blockAccessor.GetChunk(cx, cy, cz);
                 if (chunk == null || chunk.Disposed) continue;
 
+                // Data is a raw field, null whenever the chunk is currently packed (compressed
+                // after ~8s untouched -- WorldChunk.TryCommitPackAndFree). Unpack_ReadOnly is the
+                // documented way to guarantee Data is populated before touching it; every vanilla
+                // block accessor calls it first, this scan is column-direct and bypassed that.
+                if (!chunk.Unpack_ReadOnly()) continue;
+
                 IChunkBlocks blocks = chunk.Data;
                 fuzzyIds.Clear();
                 blocks.FuzzyListBlockIds(fuzzyIds);
