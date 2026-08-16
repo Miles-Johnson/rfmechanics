@@ -189,10 +189,10 @@ namespace rfmechanics
         /// rather than share an origin: worst-case observed staleness is just under 2x
         /// AttunementCensusTtlMs, not 1x. Self-heals every cycle (once real elapsed time since the
         /// actual scan exceeds Ttl, the moddata check forces a rescan), so this doesn't drift
-        /// indefinitely -- acceptable at attunement's timescale, just not free of the 2x bound. No
-        /// maturity/tree-age gate: design docs reference one, but no such check exists anywhere in
-        /// this codebase and nothing in the log-grown block data encodes age or size -- deliberate
-        /// deferral, not an oversight, unchanged from the Phase 1a stub's own note.
+        /// indefinitely -- acceptable at attunement's timescale, just not free of the 2x bound.
+        /// A cache refresh only happens when result.Determined is true; an undetermined result
+        /// (unloaded column, failed scan) leaves the cache untouched instead of stamping `now`,
+        /// so a failure gets retried next call rather than trusted for a full TTL.
         /// </summary>
         private static bool ResolveForestPresence(Entity entity, AttunementPositionalCache cache, out AttunementPositionalCache updatedCache, out ForestCensusDiagnostics diag)
         {
@@ -215,9 +215,19 @@ namespace rfmechanics
             }
 
             ForestCensusResult result = ElfForestCensus.GetForestPresence(entity.World.BlockAccessor, pos, now, cfg, RFMechanicsModSystem.Api?.Logger);
+            diag = new ForestCensusDiagnostics(result.LogCount, result.Timestamp, result.FromCache, currentGeneration, result.Generation);
+
+            if (!result.Determined)
+            {
+                // Scan failed or the column isn't loaded -- leave the cache exactly as passed in
+                // rather than stamping `now`. Caching this would trust a manufactured "no forest"
+                // answer for a full TTL, the same failure shape already closed one layer down at
+                // the moddata level (see GetForestPresence's sectionsExamined==0 path).
+                updatedCache = cache;
+                return result.IsForest;
+            }
 
             updatedCache = AttunementPositionalCache.From(cx, cz, result.IsForest, result.LogCount, result.Generation, now);
-            diag = new ForestCensusDiagnostics(result.LogCount, result.Timestamp, result.FromCache, currentGeneration, result.Generation);
             return result.IsForest;
         }
 
