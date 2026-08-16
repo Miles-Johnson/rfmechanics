@@ -151,21 +151,33 @@ public class RFMechanicsConfig
     /// WatchedAttributes. Unlike a fully-recomputed field, attunement is an accumulator, so the
     /// true value is tracked in memory between flushes rather than re-derived from the
     /// last-written value -- otherwise a sub-threshold delta would be lost every tick instead of
-    /// accumulating. OnEntityDespawn force-flushes on unload/disconnect, so only an ungraceful stop (crash) can lose the residual gap.</summary>
-    public double AttunementWriteThreshold { get; set; } = 0.5;
+    /// accumulating. OnEntityDespawn force-flushes on unload/disconnect, so only an ungraceful stop (crash) can lose the residual gap.
+    /// TUNING (2026-08-17 rate re-spec): tightened 0.5 -> 0.05. At 0.5, AttunementGainRate's
+    /// ~5/hour meant up to ~6 minutes between flushes -- too much to risk on a crash against a
+    /// ~20-hour climb. At 0.05 the window is ~36 seconds; the write itself is one
+    /// WatchedAttributes.SetFloat on an already-paid slow tick, so the extra write frequency
+    /// costs effectively nothing.</summary>
+    public double AttunementWriteThreshold { get; set; } = 0.05;
 
     /// <summary>Attunement thresholds, in ascending order, that fire
-    /// ElfAttunementBehavior.ThresholdCrossed on crossing in either direction. Effects
-    /// (Phase 2+) subscribe and hold a bool per threshold rather than ever polling Attunement
-    /// directly.</summary>
+    /// ElfAttunementBehavior.ThresholdCrossed on crossing in either direction. Effects subscribe
+    /// and hold a bool per threshold rather than ever polling Attunement directly.</summary>
     public int[] AttunementThresholds { get; set; } = new[] { 10, 25, 45, 100 };
 
     /// <summary>Full width of the dead band around each threshold (Schmitt trigger) -- prevents
     /// a value hovering near a threshold from firing a crossing event every tick. Must exceed
-    /// the largest possible single-tick delta (2.0 at current defaults; sized at 2.5 for
-    /// headroom). NOT derived automatically from the rate/interval fields, so
-    /// RFMechanicsModSystem.ValidateAttunementConfig checks this bound at load time and warns if a retune violates it silently.</summary>
-    public double AttunementThresholdHysteresis { get; set; } = 2.5;
+    /// the largest possible single-tick delta. NOT derived automatically from the rate/interval
+    /// fields, so RFMechanicsModSystem.ValidateAttunementConfig checks this bound at load time
+    /// and warns if a retune violates it silently.
+    /// TUNING (2026-08-17 rate re-spec): tightened 2.5 -> 0.2. The 2.5 value was sized against
+    /// the old flat-rate model's worst-case tick delta of 2.0; at the new ~5/hour gain rate the
+    /// worst-case delta is ~0.009, so 2.5 was ~270x oversized -- a value hovering near threshold
+    /// 25 sat in a 2.5-wide dead zone that took ~30 minutes to cross, well past where the design
+    /// doc says the threshold should visibly land. 0.2 still clears the worst-case delta by a
+    /// wide, safe margin (~21x) while keeping the dead zone (and the real-time cost of crossing
+    /// it, ~2.4 minutes at current rates) small enough that thresholds read as landing where the
+    /// numbers say they do.</summary>
+    public double AttunementThresholdHysteresis { get; set; } = 0.2;
 
     // ── Elf attunement forest census (Phase 1b) ──
 
