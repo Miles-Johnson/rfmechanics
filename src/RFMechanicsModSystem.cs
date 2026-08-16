@@ -247,10 +247,17 @@ namespace rfmechanics
                         thresholdParts.Add(string.Format("{0}={1}", cfg.AttunementThresholds[i], isActive ? "on" : "off"));
                     }
 
+                    long cacheAgeMs = diag.ForestCensus.LastCheckedTimeMs < 0
+                        ? -1
+                        : entity.World.ElapsedMilliseconds - diag.ForestCensus.LastCheckedTimeMs;
+
                     string msg = string.Format(
-                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresenceStub={5} groveMembershipStub={6}] thresholds=[{7}]",
+                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5} groveMembershipStub={6}] " +
+                        "census[logCount={7} threshold={8} cacheAgeMs={9} fromCache={10} cachedGen={11} currentGen={12}] thresholds=[{13}]",
                         behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
                         diag.ForestNaturalGround, diag.ForestPresence, diag.GroveTier.HasValue,
+                        diag.ForestCensus.LogCount, cfg.AttunementCensusLogCountThreshold, cacheAgeMs, diag.ForestCensus.FromCache,
+                        diag.ForestCensus.CachedGeneration, diag.ForestCensus.CurrentGeneration,
                         string.Join(" ", thresholdParts));
 
                     return TextCommandResult.Success(msg);
