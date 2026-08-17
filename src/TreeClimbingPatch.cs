@@ -158,7 +158,8 @@ namespace rfmechanics
         {
             if (block?.Code?.Path != null && block.Code.Path.StartsWith("log-grown")) return true;
 
-            if (world.BlockAccessor.GetBlockEntity(pos) is BlockEntityMicroBlock micro && micro.BlockIds != null)
+            BlockEntity blockEntity = world.BlockAccessor.GetBlockEntity(pos);
+            if (blockEntity is BlockEntityMicroBlock micro && micro.BlockIds != null)
             {
                 foreach (int id in micro.BlockIds)
                 {

@@ -20,17 +20,23 @@ namespace rfmechanics
     /// GenerateCollisionBoxList, strictly after CollisionBoxList is populated and before
     /// ApplyTerrainCollision's push-out.
     ///
-    /// E3.4 (canopy standing at 25): a scaffolding-mod reference (third-party, decompiled --
+    /// Crouch-to-descend: for every elf, boxes whose top is strictly above foot Y are stripped
+    /// UNLESS the entity is also sneaking, in which case every branchy box is stripped (full
+    /// passthrough). entity.Controls.Sneak is read rather than ServerControls -- Controls is the
+    /// locally-driven, zero-latency copy on the client and is aliased to the same object as
+    /// ServerControls on the server (EntityAgent.Initialize), so one read is correct on both
+    /// sides without a side branch.
+    ///
+    /// Canopy standing: unconditional for elves (no attunement gate -- see
+    /// elf-attunement-removal-report.md). A scaffolding-mod reference (third-party, decompiled --
     /// see notes/race-mechanics/elf-scaffolding-diagnostic-findings.md) was evaluated and
-    /// rejected as a template. It injects whole-block boxes gated on vanilla's ladder-climbing
-    /// control state, which doesn't guarantee horizontal passthrough and has no attunement gate
-    /// to borrow. What's implemented here instead is a same-postfix, removal-only extension:
-    /// below LeafStandingAttunementThreshold every branchy box is stripped as before; at/above
-    /// it, only boxes whose top is strictly above the entity's foot Y are stripped. This is an
-    /// exclusion, not a selection -- there's no threshold to cross and therefore nothing to
-    /// debounce, since push-out physics always rests the entity exactly on top of whichever box
-    /// currently supports it (that box's Y2 == footY, never &gt; footY), so it's never the one
-    /// a jump or a step strips.
+    /// rejected as a template: it injects whole-block boxes gated on vanilla's ladder-climbing
+    /// control state, which doesn't guarantee horizontal passthrough. What's implemented here
+    /// instead is a same-postfix, removal-only extension: only boxes whose top is strictly above
+    /// the entity's foot Y are stripped, unless the entity is sneaking, which forces a full strip.
+    /// This is an exclusion, not a selection -- push-out physics always rests the entity exactly
+    /// on top of whichever box currently supports it (that box's Y2 == footY, never &gt; footY),
+    /// so it's never the one a jump or a step strips.
     /// </summary>
     [HarmonyPatch]
     public static class BranchyLeavesPassthroughPatch
@@ -89,12 +95,12 @@ namespace rfmechanics
 
                 if (!testerEntity.TryGetValue(__instance, out Entity? entity)) return;
 
-                // IsElfCached already applies the exact EntityPlayer/characterClass-null/HasTrait
-                // guard chain RefreshElfCache runs on its own slow tick -- reading it here (a
-                // field on the entity's own attached behavior) replaces walking the trait system
-                // on this per-substep hot path.
-                var behavior = entity.GetBehavior<ElfAttunementBehavior>();
-                if (behavior == null || !behavior.IsElfCached) return;
+                // IsElf already applies the exact EntityPlayer/characterClass-null/HasTrait guard
+                // chain RefreshElfCache runs on its own slow tick -- reading it here (a field on
+                // the entity's own attached behavior) replaces walking the trait system on this
+                // per-substep hot path.
+                var identity = entity.GetBehavior<ElfIdentityBehavior>();
+                if (identity == null || !identity.IsElf) return;
 
                 // Matches how CollisionTester.ApplyTerrainCollision itself derives the entity's
                 // world-space box (entityBox.SetAndTranslate(entity.CollisionBox, pos.X, pos.Y, pos.Z))
@@ -102,7 +108,12 @@ namespace rfmechanics
                 // rather than assume, since that's what "foot level" means to the engine itself.
                 double footY = entity.Pos.Y + entity.CollisionBox.Y1;
 
-                FilterBranchyLeaves(__instance.CollisionBoxList, behavior.LeafStandingActive, footY, cfg.LogLeafStandingBoxCounts);
+                // Canopy standing is unconditional for elves (identity already gated above) --
+                // only sneak forces a full strip.
+                bool sneaking = entity is EntityAgent agent && agent.Controls.Sneak;
+                bool retainFootSupport = !sneaking;
+
+                FilterBranchyLeaves(__instance.CollisionBoxList, retainFootSupport, footY, cfg.LogLeafStandingBoxCounts);
             }
             catch (Exception ex)
             {

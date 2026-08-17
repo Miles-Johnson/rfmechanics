@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Config;
@@ -26,13 +27,14 @@ namespace rfmechanics
             staticApi = api;
 
             LoadConfig(api);
-            ValidateAttunementConfig(api, config);
 
             api.Logger.Notification("[rfmechanics] Config loaded. DwarfTraitCode={0}, EnableMiningCurve={1}, EnableOreCurve={2}, OreThreshold={3}, OreCeiling={4}, ClimbSpeedFactor={5}, ClimbSaturationPerSecond={6}, EnableClimbSpeed={7}, EnableClimbSaturation={8}, ElfTraitCode={9}, EnableBranchyLeavesPassthrough={10}, EnableTreeProximitySpeed={11}, TreeProximityRadius={12}, TreeProximityMaxBonus={13}, EnableTreeClimbing={14}, EnableFallDamageReduction={15}, FallDamageReductionFactor={16}, GoblinTraitCode={17}, EnableGoblinDarkvision={18}, GoblinDarkvisionStrength={19}, EnableGoblinFallDamageReduction={20}, GoblinFallDamageReductionFactor={21}",
                 config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
 
             api.RegisterEntityBehaviorClass("rftreeproximity", typeof(RFTreeProximityBehavior));
-            api.RegisterEntityBehaviorClass("rfelfattunement", typeof(ElfAttunementBehavior));
+            api.RegisterEntityBehaviorClass("rfelfidentity", typeof(ElfIdentityBehavior));
+            api.RegisterEntityBehaviorClass("rfelfstepheight", typeof(ElfStepHeightBehavior));
+            api.RegisterEntityBehaviorClass("rfelfzoom", typeof(RFElfZoomBehavior));
             api.RegisterEntityBehaviorClass("rfthew", typeof(ThewBehavior));
             api.RegisterEntityBehaviorClass("rfband", typeof(BandBehavior));
             api.RegisterEntityBehaviorClass("rfburn", typeof(BurnBehavior));
@@ -59,6 +61,31 @@ namespace rfmechanics
             }
         }
 
+        private static long lastStepHeightToggleSentMs;
+
+        public override void StartClientSide(ICoreClientAPI api)
+        {
+            base.StartClientSide(api);
+            RegisterElfStepHeightHotkey(api);
+        }
+
+        /// <summary>200ms client-side debounce so a held key doesn't spam the server with
+        /// repeated toggle commands -- RegisterHotKey's handler fires on key-repeat, not just the
+        /// initial press.</summary>
+        private void RegisterElfStepHeightHotkey(ICoreClientAPI api)
+        {
+            api.Input.RegisterHotKey("rfelfstepheighttoggle", "Toggle Elf Step Height Boost", GlKeys.H, HotkeyType.CharacterControls, ctrlPressed: true);
+            api.Input.SetHotKeyHandler("rfelfstepheighttoggle", _ =>
+            {
+                long now = api.World.ElapsedMilliseconds;
+                if (now - lastStepHeightToggleSentMs < 200) return true;
+                lastStepHeightToggleSentMs = now;
+
+                api.SendChatMessage("/rfelfstepheight toggle");
+                return true;
+            });
+        }
+
         public override void Dispose()
         {
             if (harmony != null)
@@ -66,6 +93,11 @@ namespace rfmechanics
                 harmony.UnpatchAll(HarmonyId);
                 harmony = null;
             }
+
+            // Static zoom state has no per-entity despawn hook that fires on client disconnect
+            // (EnumDespawnReason.Disconnect means "last player left the server", not this).
+            RFElfZoomBehavior.ResetStaticState();
+
             base.Dispose();
         }
 
@@ -92,42 +124,6 @@ namespace rfmechanics
             if (!malformed)
             {
                 api.StoreModConfig(config, "rfmechanics.json");
-            }
-        }
-
-        /// <summary>Guards the invariant AttunementThresholdHysteresis's own doc comment states
-        /// but can't enforce on its own: it must exceed the largest possible single-tick
-        /// attunement delta, or threshold-crossing events chatter. Warning only, not a hard
-        /// failure -- retuning those rate/interval fields is expected, so this surfaces a bad retune immediately instead of as unexplained event spam later.</summary>
-        private static void ValidateAttunementConfig(ICoreAPI api, RFMechanicsConfig cfg)
-        {
-            double maxRate = Math.Max(cfg.AttunementDecayRate, cfg.AttunementGainRate);
-            double maxTickDelta = maxRate * cfg.AttunementTickInterval;
-
-            if (cfg.AttunementThresholdHysteresis <= maxTickDelta)
-            {
-                api.Logger.Warning(
-                    "[rfmechanics] ElfAttunement: AttunementThresholdHysteresis ({0}) does not exceed the worst-case single-tick delta ({1:F3} = max(DecayRate={2}, GainRate={3}) * TickInterval={4}) -- threshold-crossing events can chatter near a threshold. Raise AttunementThresholdHysteresis above {1:F3}.",
-                    cfg.AttunementThresholdHysteresis, maxTickDelta, cfg.AttunementDecayRate, cfg.AttunementGainRate, cfg.AttunementTickInterval);
-            }
-
-            // Phase 1b: an inverted/empty band silently under-scans (or never scans) instead of
-            // throwing, so this would otherwise surface as "check 2 never reads Forest" with
-            // no obvious cause.
-            if (cfg.AttunementCensusSurfaceBandBelow < 0 || cfg.AttunementCensusSurfaceBandAbove < 0)
-            {
-                api.Logger.Warning(
-                    "[rfmechanics] ElfAttunement: AttunementCensusSurfaceBandBelow ({0}) and AttunementCensusSurfaceBandAbove ({1}) must both be >= 0 -- a negative band inverts or shrinks the census scan range.",
-                    cfg.AttunementCensusSurfaceBandBelow, cfg.AttunementCensusSurfaceBandAbove);
-            }
-
-            // A threshold <= 0 makes every censused column read as forest unconditionally --
-            // technically well-defined, but almost certainly not what a retune intended.
-            if (cfg.AttunementCensusLogCountThreshold <= 0)
-            {
-                api.Logger.Warning(
-                    "[rfmechanics] ElfAttunement: AttunementCensusLogCountThreshold ({0}) is <= 0 -- every censused column will read as forest-present unconditionally.",
-                    cfg.AttunementCensusLogCountThreshold);
             }
         }
 
@@ -197,125 +193,34 @@ namespace rfmechanics
             RegisterThewCommand(api);
             RegisterRotAuraDiagCommand(api);
             RegisterRotAuraDebugCommand(api);
-
-            // Server-only: ElfAttunementBehavior's tick never runs client-side, so only the server needs the resolved whitelist.
-            if (config != null) ElfAttunementBlockWhitelist.Resolve(api, config);
-
-            // Logging only. E3.4's leaf-standing gate (LeafStandingActive) is not maintained
-            // here -- it's set inline inside ElfAttunementBehavior.EvaluateThresholds, the same
-            // crossing detection that raises this event, so BranchyLeavesPassthroughPatch's
-            // per-substep read never depends on subscriber registration order at mod start.
-            ElfAttunementBehavior.ThresholdCrossed += (entity, threshold, active, value) =>
-            {
-                api.Logger.Notification("[rfmechanics] ElfAttunement threshold {0} {1} for entity {2} (value={3:F2})",
-                    threshold, active ? "ENTERED" : "LEFT", entity.EntityId, value);
-            };
-
-            RegisterAttunementDiagCommand(api);
-            RegisterAttunementSetCommand(api);
+            RegisterElfStepHeightToggleCommand(api);
         }
 
-        /// <summary>Elf attunement diagnostics: the float, the resolved context, which of the
-        /// three GetAttunementContext checks individually passed/failed, which threshold
-        /// bands are active, and every Phase 3 threshold effect's own active/inactive gate
-        /// plus its configured threshold (leaf-standing E3.4, tree-proximity E3.5, hunger-drain
-        /// E3.6) -- so a threshold crossing's effects are visible without reading stats by hand.
-        /// Server-side only: the live value lives in behavior memory plus WatchedAttributes,
-        /// both only meaningful against the real server entity.</summary>
-        private void RegisterAttunementDiagCommand(ICoreServerAPI api)
+        /// <summary>Server-side counterpart to the client hotkey (RegisterElfStepHeightHotkey) --
+        /// flips a per-player WatchedAttributes bool, which ElfStepHeightBehavior reads directly.
+        /// Chat command rather than a network channel: this codebase has no existing packet
+        /// infrastructure, and every other per-player toggle here already goes through
+        /// ChatCommands.</summary>
+        private void RegisterElfStepHeightToggleCommand(ICoreServerAPI api)
         {
-            api.ChatCommands.Create("rfattune")
-                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds, and each Phase 3 effect's active/inactive gate.")
+            api.ChatCommands.Create("rfelfstepheight")
+                .WithDescription("Toggle the Elf step-height boost for the calling player (also bound to a client hotkey, default Ctrl+H).")
                 .RequiresPrivilege(Privilege.chat)
-                .HandleWith(args =>
-                {
-                    IPlayer player = args.Caller.Player;
-                    if (player == null)
-                        return TextCommandResult.Success("No player context.");
-
-                    var cfg = Config;
-                    if (cfg == null)
-                        return TextCommandResult.Success("Config not loaded.");
-
-                    Entity entity = player.Entity;
-                    var behavior = entity.GetBehavior<ElfAttunementBehavior>();
-                    if (behavior == null)
-                        return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
-
-                    // Prefers the behavior's own per-tick cache over a fresh GetDiagnostics call, but only when
-                    // IsElfCached confirms the tick has actually run -- otherwise LastDiagnostics sits at its
-                    // Unevaluated default, and reporting that as real would misleadingly show "context=None, every check false".
-                    string diagSource;
-                    AttunementDiagnostics diag;
-                    if (cfg.EnableElfAttunement && behavior.IsElfCached)
+                .BeginSubCommand("toggle")
+                    .HandleWith(args =>
                     {
-                        diag = behavior.LastDiagnostics;
-                        diagSource = "cached (last tick)";
-                    }
-                    else
-                    {
-                        diag = ElfAttunementContext.GetDiagnostics(entity, behavior.ForestCache, out var updatedCache);
-                        behavior.ForestCache = updatedCache; // keeps the cache warm even when called off the tick path
-                        diagSource = cfg.EnableElfAttunement ? "live (not cached yet -- not currently an elf)" : "live (EnableElfAttunement=false, tick not running)";
-                    }
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
 
-                    bool[] active = behavior.ActiveThresholdsSnapshot;
-                    var thresholdParts = new System.Collections.Generic.List<string>();
-                    for (int i = 0; i < cfg.AttunementThresholds.Length; i++)
-                    {
-                        bool isActive = i < active.Length && active[i];
-                        thresholdParts.Add(string.Format("{0}={1}", cfg.AttunementThresholds[i], isActive ? "on" : "off"));
-                    }
+                        bool defaultOn = Config?.ElfStepHeightDefaultEnabled ?? true;
+                        bool current = player.Entity.WatchedAttributes.GetBool("rf-elf-stepheight-enabled", defaultOn);
+                        bool next = !current;
+                        player.Entity.WatchedAttributes.SetBool("rf-elf-stepheight-enabled", next);
 
-                    long cacheAgeMs = diag.ForestCensus.LastCheckedTimeMs < 0
-                        ? -1
-                        : entity.World.ElapsedMilliseconds - diag.ForestCensus.LastCheckedTimeMs;
-
-                    string msg = string.Format(
-                        "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5}] " +
-                        "census[logCount={6} threshold={7} cacheAgeMs={8} fromCache={9} cachedGen={10} currentGen={11}] thresholds=[{12}] " +
-                        "leafStanding[active={13} threshold={14}] treeProximity[active={15} threshold={16}] " +
-                        "hungerDrain[active={17} threshold={18}]",
-                        behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
-                        diag.ForestNaturalGround, diag.ForestPresence,
-                        diag.ForestCensus.LogCount, cfg.AttunementCensusLogCountThreshold, cacheAgeMs, diag.ForestCensus.FromCache,
-                        diag.ForestCensus.CachedGeneration, diag.ForestCensus.CurrentGeneration,
-                        string.Join(" ", thresholdParts),
-                        behavior.LeafStandingActive, cfg.LeafStandingAttunementThreshold,
-                        behavior.TreeProximityActive, cfg.TreeProximityAttunementThreshold,
-                        behavior.HungerDrainActive, cfg.HungerDrainAttunementThreshold);
-
-                    return TextCommandResult.Success(msg);
-                });
-        }
-
-        /// <summary>Force-sets Elf attunement on the calling player (testing only) -- writes
-        /// both the in-memory live value and the flushed WatchedAttributes value together via
-        /// ElfAttunementBehavior.DebugSetAttunement, and evaluates thresholds immediately so
-        /// LeafStandingActive reflects the forced value without waiting for the next slow tick.
-        /// Root-privileged like rfthew's "set" subcommand -- this bypasses real gain/decay
-        /// entirely, at rates where reaching threshold 25 naturally takes hours.</summary>
-        private void RegisterAttunementSetCommand(ICoreServerAPI api)
-        {
-            CommandArgumentParsers parsers = api.ChatCommands.Parsers;
-
-            api.ChatCommands.Create("rfattuneset")
-                .WithDescription("Force-set Elf attunement on the calling player (testing only).")
-                .RequiresPrivilege(Privilege.root)
-                .WithArgs(parsers.Float("value"))
-                .HandleWith(args =>
-                {
-                    IPlayer player = args.Caller.Player;
-                    if (player == null)
-                        return TextCommandResult.Success("No player context.");
-
-                    var behavior = player.Entity.GetBehavior<ElfAttunementBehavior>();
-                    if (behavior == null)
-                        return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
-
-                    float value = behavior.DebugSetAttunement((float)args[0]);
-                    return TextCommandResult.Success(string.Format("Attunement set to {0:F2}", value));
-                });
+                        return TextCommandResult.Success(string.Format("Elf step height boost {0}.", next ? "enabled" : "disabled"));
+                    })
+                .EndSubCommand();
         }
 
         /// <summary>Rot aura diagnostics: raw dietsetup rot-intake, elapsed hours since last

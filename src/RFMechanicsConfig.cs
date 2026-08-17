@@ -63,13 +63,6 @@ public class RFMechanicsConfig
     /// <summary>Master toggle for the branchy-leaves collision passthrough.</summary>
     public bool EnableBranchyLeavesPassthrough { get; set; } = true;
 
-    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
-    /// which BranchyLeavesPassthroughPatch retains the branchy-leaf box supporting an Elf's
-    /// feet instead of stripping every branchy box outright -- E3.4. Below this threshold,
-    /// behavior is unchanged from E3.3: every branchy box is stripped, full passthrough, no
-    /// standing.</summary>
-    public int LeafStandingAttunementThreshold { get; set; } = 25;
-
     /// <summary>Logs branchy-leaf boxes stripped vs. retained per FilterBranchyLeaves call.
     /// Default off -- diagnostic only, for validating the E3.4 foot-level exclusion rule during
     /// the manual test pass, not meant to run in production (this is a per-substep hot path).</summary>
@@ -95,20 +88,12 @@ public class RFMechanicsConfig
     /// <summary>Tick cadence, in seconds, for RFTreeProximityBehavior's tree scan.</summary>
     public double TreeProximityTickInterval { get; set; } = 3.0;
 
-    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
-    /// which the walkspeed bonus is active -- E3.5. Below this, RFTreeProximityBehavior skips
-    /// its own block sweep entirely (not just the stat write) since there's nothing to apply.</summary>
-    public int TreeProximityAttunementThreshold { get; set; } = 25;
-
-    // ── Elf reduced hunger drain (E3.6) ──
+    // ── Elf reduced hunger drain ──
 
     /// <summary>Master toggle for the Elf reduced-hunger-drain effect, parity with every other
-    /// mechanic in this config.</summary>
+    /// mechanic in this config. Unconditional for elves now (no attunement threshold) -- applied
+    /// by ElfIdentityBehavior directly off IsElf.</summary>
     public bool EnableElfHungerDrainReduction { get; set; } = true;
-
-    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
-    /// which the reduced hunger drain applies -- E3.6.</summary>
-    public int HungerDrainAttunementThreshold { get; set; } = 25;
 
     /// <summary>Hungerrate multiplier while active, applied as a Stats.Set delta (target - 1)
     /// under source "rf-elf-attunement" on the vanilla "hungerrate" category, mirroring
@@ -130,128 +115,44 @@ public class RFMechanicsConfig
     /// <summary>Fraction of fall damage removed for Elves, e.g. 0.6 = 60% less fall damage.</summary>
     public double FallDamageReductionFactor { get; set; } = 0.6;
 
-    // ── Elf attunement (Phase 1a) ──
+    // ── Telescopic vision / zoom (Elf) ──
 
-    /// <summary>Master toggle for the Elf attunement system (ElfAttunementBehavior's owned
-    /// 0-100 WatchedAttributes float). Phase 1a only -- gain/decay and threshold effects land
-    /// in later Phase 1a tasks; this toggle already gates the behavior's tick from task one.</summary>
-    public bool EnableElfAttunement { get; set; } = true;
+    /// <summary>Master toggle for Elf telescopic vision.</summary>
+    public bool EnableElfZoom { get; set; } = true;
 
-    /// <summary>Tick cadence, in seconds, for ElfAttunementBehavior's slow tick (race-cache
-    /// refresh now; gain/decay evaluation from Phase 1a task E1.3 onward). Matches
-    /// GoblinRotAuraTickInterval's 2.0s precedent.</summary>
-    public double AttunementTickInterval { get; set; } = 2.0;
+    /// <summary>FOV multiplier at full zoom. Milder than Spyglass's 0.08 floor -- there's no
+    /// tube prop framing the view here, so a spyglass-strength drop reads as a bug, not a body trait.</summary>
+    public double ElfZoomFovMult { get; set; } = 0.5;
 
-    /// <summary>Block Code.Path prefixes (StartsWith, not wildcard) counting as "forest-natural
-    /// ground" -- verified against the live install's actual assets, not guessed. "leaves-grown"
-    /// matches every "-grown1-".."-grown7-" variant via the shared prefix while excluding
-    /// "-placed-"; "log-grown-"/"log-placed-" deliberately excludes planks and processed log
-    /// shapes. Plain soil, stone, and sand are deliberately absent.</summary>
-    public string[] AttunementForestBlockCodePrefixes { get; set; } = new[]
-    {
-        "forestfloor-",
-        "mossycobblestone-", "mossyrockpolished-", "mossystonebricks-",
-        "leaves-grown", "leavesbranchy-grown",
-        "log-grown-", "log-placed-"
-    };
+    /// <summary>Milliseconds for the FOV multiplier to ease fully between 1.0 and ElfZoomFovMult, either direction.</summary>
+    public double ElfZoomTransitionMs { get; set; } = 400.0;
 
-    /// <summary>Per-second gain rate toward AttunementCeiling. TUNING (2026-08-17 grove-removal
-    /// re-spec): see notes/race-mechanics/elf-attunement-breakdown-v2.md's rate-repricing pass for
-    /// the derivation -- ~5/hour, chosen so threshold 10 arrives within a couple hours of forest
-    /// presence and the full 0-100 climb takes ~20 hours, matching the design doc's "short session
-    /// vs. long-term goal" split. Renamed from AttunementGainRateWild when the wild/grove split
-    /// was removed -- there is only one gain context now (Forest).</summary>
-    public double AttunementGainRate { get; set; } = 0.0013889;
+    /// <summary>Milliseconds RightMouseDown must be held continuously before the zoom target
+    /// engages. Guards against the tick/render scheduling race between EntityControls.RightMouseDown
+    /// (fixed 20ms tick) and Controls.HandUse (set from render-stage interaction dispatch) --
+    /// without this, a container/block click can read as a one-tick zoom-then-cancel flicker.</summary>
+    public double ElfZoomEngageDelayMs { get; set; } = 120.0;
 
-    /// <summary>Per-second decay rate toward the context's floor -- toward 0 in
-    /// AttunementContextKind.None, or back down toward AttunementCeiling if a value somehow sits
-    /// above it. TUNING (2026-08-17 grove-removal re-spec): ~3.33x AttunementGainRate, the same
-    /// gain:decay ratio the old wild-forest numbers used (0.3 vs 1.0) -- preserves "loses ground
-    /// faster than it's gained" at the new scale. At this rate a full climb from 0 drains back to
-    /// 0 in ~6 hours of leaving forest entirely, against ~20 hours to build it.</summary>
-    public double AttunementDecayRate { get; set; } = 0.0046296;
+    // ── Elf identity ──
 
-    /// <summary>Gain ceiling in AttunementContextKind.Forest. Values above this decay back
-    /// toward it (AttunementDecayRate) rather than being hard-clamped -- see
-    /// ElfAttunementBehavior's tick step. Renamed from AttunementWildCeiling (25) on 2026-08-17:
-    /// with no grove, there's no higher ceiling to sit below, so Forest now climbs to the same
-    /// 100 that the Attunement property itself clamps to -- this field exists as a separately
-    /// tunable server-config surface, not because the value is expected to differ from 100.</summary>
-    public double AttunementCeiling { get; set; } = 100.0;
+    /// <summary>Tick cadence, in seconds, for ElfIdentityBehavior's race-cache refresh (after the
+    /// immediate Initialize()-time refresh). Matches GoblinRotAuraTickInterval's 2.0s precedent.</summary>
+    public double ElfIdentityTickInterval { get; set; } = 2.0;
 
-    /// <summary>Minimum change in the live (in-memory) attunement value before it flushes to
-    /// WatchedAttributes. Unlike a fully-recomputed field, attunement is an accumulator, so the
-    /// true value is tracked in memory between flushes rather than re-derived from the
-    /// last-written value -- otherwise a sub-threshold delta would be lost every tick instead of
-    /// accumulating. OnEntityDespawn force-flushes on unload/disconnect, so only an ungraceful stop (crash) can lose the residual gap.
-    /// TUNING (2026-08-17 rate re-spec): tightened 0.5 -> 0.05. At 0.5, AttunementGainRate's
-    /// ~5/hour meant up to ~6 minutes between flushes -- too much to risk on a crash against a
-    /// ~20-hour climb. At 0.05 the window is ~36 seconds; the write itself is one
-    /// WatchedAttributes.SetFloat on an already-paid slow tick, so the extra write frequency
-    /// costs effectively nothing.</summary>
-    public double AttunementWriteThreshold { get; set; } = 0.05;
+    // ── Elf step height ──
 
-    /// <summary>Attunement thresholds, in ascending order, that fire
-    /// ElfAttunementBehavior.ThresholdCrossed on crossing in either direction. Effects subscribe
-    /// and hold a bool per threshold rather than ever polling Attunement directly.</summary>
-    public int[] AttunementThresholds { get; set; } = new[] { 10, 25, 45, 100 };
+    /// <summary>Master toggle for the Elf step-height boost.</summary>
+    public bool EnableElfStepHeight { get; set; } = true;
 
-    /// <summary>Full width of the dead band around each threshold (Schmitt trigger) -- prevents
-    /// a value hovering near a threshold from firing a crossing event every tick. Must exceed
-    /// the largest possible single-tick delta. NOT derived automatically from the rate/interval
-    /// fields, so RFMechanicsModSystem.ValidateAttunementConfig checks this bound at load time
-    /// and warns if a retune violates it silently.
-    /// TUNING (2026-08-17 rate re-spec): tightened 2.5 -> 0.2. The 2.5 value was sized against
-    /// the old flat-rate model's worst-case tick delta of 2.0; at the new ~5/hour gain rate the
-    /// worst-case delta is ~0.009, so 2.5 was ~270x oversized -- a value hovering near threshold
-    /// 25 sat in a 2.5-wide dead zone that took ~30 minutes to cross, well past where the design
-    /// doc says the threshold should visibly land. 0.2 still clears the worst-case delta by a
-    /// wide, safe margin (~21x) while keeping the dead zone (and the real-time cost of crossing
-    /// it, ~2.4 minutes at current rates) small enough that thresholds read as landing where the
-    /// numbers say they do.</summary>
-    public double AttunementThresholdHysteresis { get; set; } = 0.2;
+    /// <summary>StepHeight value applied to elves (vanilla default is 0.6f). 1.0 is exactly the
+    /// threshold FindSteppableCollisionBox checks against, so elves auto-climb single-block-tall
+    /// obstacles (fences, stair edges) -- see ElfStepHeightBehavior and the client-side toggle.</summary>
+    public double ElfStepHeightValue { get; set; } = 1.0;
 
-    // ── Elf attunement forest census (Phase 1b) ──
-
-    /// <summary>Block Code.Path prefixes (StartsWith) counting as a living, still-standing tree
-    /// for the per-column forest census (ElfForestCensus). Deliberately separate from
-    /// AttunementForestBlockCodePrefixes above: that whitelist includes "log-placed-" (cut/placed
-    /// logs, fine as ground cover underfoot) plus leaves/moss/soil, none of which should count as
-    /// a living tree for the census. Only naturally-grown, still-standing trunks count here.</summary>
-    public string[] AttunementCensusLogCodePrefixes { get; set; } = new[] { "log-grown-" };
-
-    /// <summary>Column scan-band floor, in blocks below min(WorldGenTerrainHeightMap,
-    /// RainHeightMap) at each column position. Deliberately uses the min of the two heightmaps,
-    /// not WorldGenTerrainHeightMap alone: the latter is frozen pre-vegetation and stable, but
-    /// also pre-terrain-modification, and would miss a forested valley floor sitting beside a
-    /// worldgen ridge. A band that misses trunks under-counts silently, the worst failure mode
-    /// available here, so the wider/safer of the two floors wins.</summary>
-    public int AttunementCensusSurfaceBandBelow { get; set; } = 4;
-
-    /// <summary>Column scan-band ceiling, in blocks above RainHeightMap at each column position.
-    /// Reaches well above the rain-blocking surface to capture trunk/canopy height, not just the
-    /// ground-level footprint.</summary>
-    public int AttunementCensusSurfaceBandAbove { get; set; } = 24;
-
-    /// <summary>Log count (strictly above) at which a column's census reads as forest-present.
-    /// Roughly more than one trunk's worth, so a lone sapling doesn't qualify. No maturity/age
-    /// gate exists -- see ElfAttunementContext's check-2 doc comment for why.</summary>
-    public int AttunementCensusLogCountThreshold { get; set; } = 12;
-
-    /// <summary>Per-column census freshness window, in milliseconds, before ElfForestCensus.
-    /// GetForestPresence re-scans instead of trusting the persisted LogCount. Eager invalidation
-    /// on felling (ElfForestCensusInvalidationPatch) punches through this early by marking the
-    /// persisted record as needing a rescan regardless of age -- see ElfForestCensus.
-    /// InvalidateColumn.</summary>
-    public int AttunementCensusTtlMs { get; set; } = 300000;
-
-    /// <summary>Logs elapsed scan time, resulting log count, and prefilter-hit/total-sections
-    /// counts every time ElfForestCensus actually runs a section scan (never on a TTL-fresh or
-    /// positional-cache hit, since those skip the scan entirely). Default on for this phase to
-    /// validate the palette prefilter's real hit rate against production terrain -- the ratio is
-    /// what separates "band too wide, prefilter missing" from "band right, per-cell scan is the
-    /// real cost" once real numbers come in.</summary>
-    public bool AttunementCensusLogTiming { get; set; } = true;
+    /// <summary>Default state of each player's own step-height toggle (WatchedAttributes
+    /// "rf-elf-stepheight-enabled"), flippable via the "/rfelfstepheight toggle" command or its
+    /// bound client hotkey (default Ctrl+H).</summary>
+    public bool ElfStepHeightDefaultEnabled { get; set; } = true;
 
     // ── Elf living harvest yield (Phase 4 stub, E3.1) ──
 

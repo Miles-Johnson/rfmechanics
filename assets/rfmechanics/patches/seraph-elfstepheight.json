@@ -1,0 +1,14 @@
+[
+    {
+        "op": "add",
+        "path": "/server/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfelfstepheight" }
+    },
+    {
+        "op": "add",
+        "path": "/client/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfelfstepheight" }
+    }
+]

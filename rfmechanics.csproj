@@ -8,8 +8,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Historical record only, superseded by ElfIdentityBehavior. The implicit SDK glob would
+         otherwise compile everything under archive/ too. -->
+    <Compile Remove="archive/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="VintagestoryAPI">
       <HintPath>$(VINTAGE_STORY)/VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Client-only internals (Vintagestory.Client.NoObf.ClientMain) for the elf-zoom FOV transpiler. -->
+    <Reference Include="VintagestoryLib">
+      <HintPath>$(VINTAGE_STORY)/VintagestoryLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="VSSurvivalMod">
