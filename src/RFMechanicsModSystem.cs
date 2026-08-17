@@ -217,14 +217,15 @@ namespace rfmechanics
 
         /// <summary>Elf attunement diagnostics: the float, the resolved context, which of the
         /// three GetAttunementContext checks individually passed/failed, which threshold
-        /// bands are active, and E3.4's leaf-standing gate (LeafStandingActive plus the
-        /// configured threshold it's compared against). Server-side only: the live value lives
-        /// in behavior memory plus WatchedAttributes, both only meaningful against the real
-        /// server entity.</summary>
+        /// bands are active, and every Phase 3 threshold effect's own active/inactive gate
+        /// plus its configured threshold (leaf-standing E3.4, tree-proximity E3.5, hunger-drain
+        /// E3.6) -- so a threshold crossing's effects are visible without reading stats by hand.
+        /// Server-side only: the live value lives in behavior memory plus WatchedAttributes,
+        /// both only meaningful against the real server entity.</summary>
         private void RegisterAttunementDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfattune")
-                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds, leaf-standing gate.")
+                .WithDescription("Dump Elf attunement diagnostics for the calling player: float value, resolved context, per-check breakdown, active thresholds, and each Phase 3 effect's active/inactive gate.")
                 .RequiresPrivilege(Privilege.chat)
                 .HandleWith(args =>
                 {
@@ -273,13 +274,16 @@ namespace rfmechanics
                     string msg = string.Format(
                         "attunement={0:F2} isElf={1} context={2} ({3}) checks[forestNaturalGround={4} forestPresence={5}] " +
                         "census[logCount={6} threshold={7} cacheAgeMs={8} fromCache={9} cachedGen={10} currentGen={11}] thresholds=[{12}] " +
-                        "leafStanding[active={13} threshold={14}]",
+                        "leafStanding[active={13} threshold={14}] treeProximity[active={15} threshold={16}] " +
+                        "hungerDrain[active={17} threshold={18}]",
                         behavior.LiveAttunement, behavior.IsElfCached, diag.Context, diagSource,
                         diag.ForestNaturalGround, diag.ForestPresence,
                         diag.ForestCensus.LogCount, cfg.AttunementCensusLogCountThreshold, cacheAgeMs, diag.ForestCensus.FromCache,
                         diag.ForestCensus.CachedGeneration, diag.ForestCensus.CurrentGeneration,
                         string.Join(" ", thresholdParts),
-                        behavior.LeafStandingActive, cfg.LeafStandingAttunementThreshold);
+                        behavior.LeafStandingActive, cfg.LeafStandingAttunementThreshold,
+                        behavior.TreeProximityActive, cfg.TreeProximityAttunementThreshold,
+                        behavior.HungerDrainActive, cfg.HungerDrainAttunementThreshold);
 
                     return TextCommandResult.Success(msg);
                 });
