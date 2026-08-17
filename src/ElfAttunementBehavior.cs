@@ -82,6 +82,13 @@ namespace rfmechanics
         /// path, alongside IsElfCached -- never Attunement, never the trait system.</summary>
         public bool LeafStandingActive { get; private set; }
 
+        /// <summary>E3.5 gate: true once liveAttunement is at/above
+        /// RFMechanicsConfig.TreeProximityAttunementThreshold, false below it. Set inline inside
+        /// EvaluateThresholds, same shape as LeafStandingActive. RFTreeProximityBehavior reads
+        /// this before running its own block sweep, not just before writing the stat -- below
+        /// threshold there's nothing to compute, so the sweep itself is skipped.</summary>
+        public bool TreeProximityActive { get; private set; }
+
         /// <summary>The full per-check breakdown from this entity's last tick, computed once
         /// per tick via ElfAttunementContext.GetDiagnostics and reused for both the tick's own
         /// stepping (context = LastDiagnostics.Context) and /rfattune's dump -- avoids
@@ -278,6 +285,7 @@ namespace rfmechanics
 
                 activeThresholds[i] = nowActive;
                 if (t == cfg.LeafStandingAttunementThreshold) LeafStandingActive = nowActive;
+                if (t == cfg.TreeProximityAttunementThreshold) TreeProximityActive = nowActive;
                 ThresholdCrossed?.Invoke(entity, t, nowActive, liveAttunement);
             }
         }

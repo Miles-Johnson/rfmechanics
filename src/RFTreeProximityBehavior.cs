@@ -35,9 +35,14 @@ namespace rfmechanics
             if (accum < (float)cfg.TreeProximityTickInterval) return;
             accum = 0f;
 
-            if (!IsElf())
+            // Gates the sweep itself, not just the stat write -- below threshold there's nothing
+            // to compute, so paying the 1331-block WalkBlocks scan every tick interval would be
+            // pure waste. Reads the cached bool rather than walking the trait system directly,
+            // same shape as BranchyLeavesPassthroughPatch's IsElfCached/LeafStandingActive reads.
+            var attunement = entity.GetBehavior<ElfAttunementBehavior>();
+            if (attunement == null || !attunement.TreeProximityActive)
             {
-                // Clears any previously applied bonus rather than leaving it stuck from before a race/class change.
+                // Clears any previously applied bonus rather than leaving it stuck from before dropping below threshold or a race/class change.
                 TrySet(1f, cfg);
                 return;
             }
@@ -45,25 +50,6 @@ namespace rfmechanics
             float strength = GetNearTreeStrength(cfg.TreeProximityRadius);
             float walkspeed = 1f + strength * (float)cfg.TreeProximityMaxBonus;
             TrySet(walkspeed, cfg);
-        }
-
-        // charClass null-check is load-bearing: HasTrait returns true for a null class by default.
-        private bool IsElf()
-        {
-            var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null) return false;
-            if (entity is not EntityPlayer player) return false;
-
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass)) return false;
-
-            IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) return false;
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null) return false;
-
-            return charSys.HasTrait(iplayer, cfg.ElfTraitCode);
         }
 
         /// <summary>"log-grown" prefix identifies a standing tree log; cut/placed logs and firewood are excluded on purpose.</summary>

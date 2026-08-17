@@ -95,6 +95,11 @@ public class RFMechanicsConfig
     /// <summary>Tick cadence, in seconds, for RFTreeProximityBehavior's tree scan.</summary>
     public double TreeProximityTickInterval { get; set; } = 3.0;
 
+    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
+    /// which the walkspeed bonus is active -- E3.5. Below this, RFTreeProximityBehavior skips
+    /// its own block sweep entirely (not just the stat write) since there's nothing to apply.</summary>
+    public int TreeProximityAttunementThreshold { get; set; } = 25;
+
     // ── Tree climbing (Elf) ──
 
     /// <summary>Master toggle for letting Elves climb standing tree trunks ("log-grown"
