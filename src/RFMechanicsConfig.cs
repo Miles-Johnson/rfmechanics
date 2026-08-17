@@ -100,6 +100,21 @@ public class RFMechanicsConfig
     /// its own block sweep entirely (not just the stat write) since there's nothing to apply.</summary>
     public int TreeProximityAttunementThreshold { get; set; } = 25;
 
+    // ── Elf reduced hunger drain (E3.6) ──
+
+    /// <summary>Master toggle for the Elf reduced-hunger-drain effect, parity with every other
+    /// mechanic in this config.</summary>
+    public bool EnableElfHungerDrainReduction { get; set; } = true;
+
+    /// <summary>Attunement threshold (must match an entry in AttunementThresholds) at and above
+    /// which the reduced hunger drain applies -- E3.6.</summary>
+    public int HungerDrainAttunementThreshold { get; set; } = 25;
+
+    /// <summary>Hungerrate multiplier while active, applied as a Stats.Set delta (target - 1)
+    /// under source "rf-elf-attunement" on the vanilla "hungerrate" category, mirroring
+    /// HungerRateMult's convention. 0.85 = 15% less hunger drain.</summary>
+    public double ElfHungerRateMult { get; set; } = 0.85;
+
     // ── Tree climbing (Elf) ──
 
     /// <summary>Master toggle for letting Elves climb standing tree trunks ("log-grown"

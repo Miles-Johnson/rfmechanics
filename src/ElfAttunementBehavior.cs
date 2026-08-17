@@ -35,6 +35,7 @@ namespace rfmechanics
     public class ElfAttunementBehavior : EntityBehavior
     {
         private const string AttributeKey = "rf-elf-attunement";
+        private const string HungerDrainStatSource = "rf-elf-attunement";
 
         /// <summary>Fires once per threshold per crossing direction -- never a storm, see
         /// EvaluateThresholds' Schmitt-trigger hysteresis. Static: effects (Phase 2+) subscribe
@@ -88,6 +89,13 @@ namespace rfmechanics
         /// this before running its own block sweep, not just before writing the stat -- below
         /// threshold there's nothing to compute, so the sweep itself is skipped.</summary>
         public bool TreeProximityActive { get; private set; }
+
+        /// <summary>E3.6 gate: true once liveAttunement is at/above
+        /// RFMechanicsConfig.HungerDrainAttunementThreshold, false below it. Set inline inside
+        /// EvaluateThresholds. Unlike LeafStandingActive/TreeProximityActive (read by another
+        /// behavior), this behavior applies/clears the hungerrate stat itself on the crossing --
+        /// there's no per-tick recompute needed, just a flat multiplier while active.</summary>
+        public bool HungerDrainActive { get; private set; }
 
         /// <summary>The full per-check breakdown from this entity's last tick, computed once
         /// per tick via ElfAttunementContext.GetDiagnostics and reused for both the tick's own
@@ -286,8 +294,28 @@ namespace rfmechanics
                 activeThresholds[i] = nowActive;
                 if (t == cfg.LeafStandingAttunementThreshold) LeafStandingActive = nowActive;
                 if (t == cfg.TreeProximityAttunementThreshold) TreeProximityActive = nowActive;
+                if (t == cfg.HungerDrainAttunementThreshold)
+                {
+                    HungerDrainActive = nowActive;
+                    ApplyOrClearHungerDrain(nowActive, cfg);
+                }
                 ThresholdCrossed?.Invoke(entity, t, nowActive, liveAttunement);
             }
+        }
+
+        /// <summary>E3.6: applies the reduced-hunger-drain multiplier as a Stats.Set delta on
+        /// crossing up, removes the stat entry entirely on crossing down -- mirrors
+        /// BandBehavior.ClearBandStats' Remove (not a zero-delta Set), since there's no other
+        /// consumer relying on the key's continued presence.</summary>
+        private void ApplyOrClearHungerDrain(bool active, RFMechanicsConfig cfg)
+        {
+            if (!cfg.EnableElfHungerDrainReduction || !active)
+            {
+                entity.Stats.Remove("hungerrate", HungerDrainStatSource);
+                return;
+            }
+
+            entity.Stats.Set("hungerrate", HungerDrainStatSource, (float)cfg.ElfHungerRateMult - 1f);
         }
 
         /// <summary>Moves current toward target at ratePerSecond, clamped so it can never
