@@ -4,5 +4,11 @@
         "path": "/server/behaviors/-",
         "file": "game:entities/humanoid/player.json",
         "value": { "code": "rfelfattunement" }
+    },
+    {
+        "op": "add",
+        "path": "/client/behaviors/-",
+        "file": "game:entities/humanoid/player.json",
+        "value": { "code": "rfelfattunement" }
     }
 ]
