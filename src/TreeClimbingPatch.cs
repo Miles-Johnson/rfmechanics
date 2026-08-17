@@ -129,7 +129,7 @@ namespace rfmechanics
                 {
                     tmpPos.Y = baseY + dy;
                     Block inBlock = blockAccessor.GetBlock(tmpPos, BlockLayersAccess.Solid);
-                    if (inBlock?.Code?.Path == null || !inBlock.Code.Path.StartsWith("log-grown")) continue;
+                    if (!IsClimbableLog(entity.World, inBlock, tmpPos)) continue;
 
                     Cuboidf[] collisionBoxes = inBlock.GetCollisionBoxes(blockAccessor, tmpPos);
                     if (collisionBoxes == null) continue;
@@ -144,6 +144,25 @@ namespace rfmechanics
                             return true;
                         }
                     }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Chiseling replaces a block's own Code.Path with the generic "chiseledblock",
+        /// so a carved log trunk no longer matches the "log-grown" prefix directly -- the
+        /// fallback reads BlockEntityMicroBlock.BlockIds (the constituent materials chisel/schematic
+        /// placement preserves) so a decorated tree stays climbable, not just an unmodified one.</summary>
+        private static bool IsClimbableLog(IWorldAccessor world, Block block, BlockPos pos)
+        {
+            if (block?.Code?.Path != null && block.Code.Path.StartsWith("log-grown")) return true;
+
+            if (world.BlockAccessor.GetBlockEntity(pos) is BlockEntityMicroBlock micro && micro.BlockIds != null)
+            {
+                foreach (int id in micro.BlockIds)
+                {
+                    if (world.GetBlock(id)?.Code?.Path?.StartsWith("log-grown") == true) return true;
                 }
             }
 
