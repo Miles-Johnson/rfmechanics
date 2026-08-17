@@ -159,6 +159,25 @@ namespace rfmechanics
             StepAttunement(LastDiagnostics.Context, cfg);
         }
 
+        /// <summary>Testing-only override for /rfattuneset. Writes liveAttunement directly, not
+        /// just the flushed Attunement property -- StepAttunement steps liveAttunement toward
+        /// its context target every tick and would otherwise silently overwrite a value set
+        /// only in WatchedAttributes on the very next tick. Runs EvaluateThresholds immediately
+        /// so LeafStandingActive and the other threshold bools reflect the forced value without
+        /// waiting for the next slow tick.</summary>
+        public float DebugSetAttunement(float value)
+        {
+            liveAttunement = GameMath.Clamp(value, 0f, 100f);
+            liveInitialized = true;
+            Attunement = liveAttunement;
+            lastFlushedAttunement = Attunement;
+
+            var cfg = RFMechanicsModSystem.Config;
+            if (cfg != null) EvaluateThresholds(cfg);
+
+            return liveAttunement;
+        }
+
         /// <summary>Flushes any unwritten liveAttunement drift to WatchedAttributes immediately
         /// on despawn (covers disconnect) -- without this, up to AttunementWriteThreshold of
         /// progress sits only in behavior memory and is lost the moment the entity unloads.

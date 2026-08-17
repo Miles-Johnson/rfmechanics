@@ -200,6 +200,7 @@ namespace rfmechanics
             };
 
             RegisterAttunementDiagCommand(api);
+            RegisterAttunementSetCommand(api);
         }
 
         /// <summary>Elf attunement diagnostics: the float, the resolved context, which of the
@@ -269,6 +270,35 @@ namespace rfmechanics
                         behavior.LeafStandingActive, cfg.LeafStandingAttunementThreshold);
 
                     return TextCommandResult.Success(msg);
+                });
+        }
+
+        /// <summary>Force-sets Elf attunement on the calling player (testing only) -- writes
+        /// both the in-memory live value and the flushed WatchedAttributes value together via
+        /// ElfAttunementBehavior.DebugSetAttunement, and evaluates thresholds immediately so
+        /// LeafStandingActive reflects the forced value without waiting for the next slow tick.
+        /// Root-privileged like rfthew's "set" subcommand -- this bypasses real gain/decay
+        /// entirely, at rates where reaching threshold 25 naturally takes hours.</summary>
+        private void RegisterAttunementSetCommand(ICoreServerAPI api)
+        {
+            CommandArgumentParsers parsers = api.ChatCommands.Parsers;
+
+            api.ChatCommands.Create("rfattuneset")
+                .WithDescription("Force-set Elf attunement on the calling player (testing only).")
+                .RequiresPrivilege(Privilege.root)
+                .WithArgs(parsers.Float("value"))
+                .HandleWith(args =>
+                {
+                    IPlayer player = args.Caller.Player;
+                    if (player == null)
+                        return TextCommandResult.Success("No player context.");
+
+                    var behavior = player.Entity.GetBehavior<ElfAttunementBehavior>();
+                    if (behavior == null)
+                        return TextCommandResult.Success("ElfAttunementBehavior not attached to this entity (relog after a fresh deploy?).");
+
+                    float value = behavior.DebugSetAttunement((float)args[0]);
+                    return TextCommandResult.Success(string.Format("Attunement set to {0:F2}", value));
                 });
         }
 
