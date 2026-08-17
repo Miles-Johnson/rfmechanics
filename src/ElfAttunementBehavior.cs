@@ -118,8 +118,6 @@ namespace rfmechanics
 
         public override void OnGameTick(float deltaTime)
         {
-            if (entity.World.Side != EnumAppSide.Server) return;
-
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null || !cfg.EnableElfAttunement) return;
 
@@ -136,6 +134,20 @@ namespace rfmechanics
             accum += deltaTime;
             if (accum < (float)cfg.AttunementTickInterval) return;
             accum = 0f;
+
+            if (entity.World.Side != EnumAppSide.Server)
+            {
+                // BehaviorControlledPhysics.OnGameTick's own comment: "Player physics is called
+                // only client side" -- BranchyLeavesPassthroughPatch's collision postfix runs on
+                // this side's CachingCollisionTester, so IsElfCached/LeafStandingActive must stay
+                // fresh here too or passthrough never engages regardless of attunement, no matter
+                // what the server-side value says. Cheap and side-effect-free: no gain/decay
+                // stepping, no forest census, no WatchedAttributes write -- Attunement is already
+                // synced from the server, so the threshold compares against it directly.
+                RefreshElfCache();
+                LeafStandingActive = IsElfCached && Attunement >= (float)cfg.LeafStandingAttunementThreshold;
+                return;
+            }
 
             if (!liveInitialized)
             {
