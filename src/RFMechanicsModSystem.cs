@@ -174,6 +174,18 @@ namespace rfmechanics
             return config.OreCeiling * (depthFrac - threshold) / (1.0 - threshold);
         }
 
+        /// <summary>
+        /// Living harvest yield multiplier (E3.1 stub, curve is E4.2). Convex ease-in --
+        /// poor + (full - poor) * (attunement/100)^2 -- so early attunement stays meaningfully
+        /// poor instead of ramping proportionally with a linear curve. Not called from anywhere
+        /// yet; Phase 4 wires this once the harvest tool (shears vs. knife, D3) is decided.
+        /// </summary>
+        public static double ComputeHarvestYieldMultiplier(float attunement)
+        {
+            double t = GameMath.Clamp(attunement, 0f, 100f) / 100.0;
+            return config.ElfHarvestYieldPoor + (config.ElfHarvestYieldFull - config.ElfHarvestYieldPoor) * t * t;
+        }
+
         // ── Command registration ──
 
         public override void StartServerSide(ICoreServerAPI api)

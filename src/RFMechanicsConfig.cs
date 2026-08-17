@@ -233,6 +233,16 @@ public class RFMechanicsConfig
     /// real cost" once real numbers come in.</summary>
     public bool AttunementCensusLogTiming { get; set; } = true;
 
+    // ── Elf living harvest yield (Phase 4 stub, E3.1) ──
+
+    /// <summary>Yield multiplier at attunement 0. Stub only -- Phase 4 wires this to the actual
+    /// harvest tool once D3 (shears vs. knife) is settled; ComputeHarvestYieldMultiplier is not
+    /// called from anywhere yet.</summary>
+    public double ElfHarvestYieldPoor { get; set; } = 0.25;
+
+    /// <summary>Yield multiplier at attunement 100.</summary>
+    public double ElfHarvestYieldFull { get; set; } = 1.0;
+
     // ── Thew (Orc) ──
 
     /// <summary>Master toggle for the Thew mechanic (gain/decay tick and preserved-protein multiplier).</summary>
