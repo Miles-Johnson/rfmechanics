@@ -723,6 +723,33 @@ public class RFMechanicsConfig
     /// not cosmetic -- two same-material clusters at identical pitch are phase-identical files
     /// and comb-filter into sounding like one source.</summary>
     public double OreSongPitchJitter { get; set; } = 0.05;
+
+    // ── Chunk scar tracker (diagnostic only) ──
+
+    /// <summary>Master toggle for ChunkScarBreakPatch's write path and the /rfscar command's
+    /// read path. Diagnostic-only: no gameplay effect anywhere, exists to measure whether
+    /// IMapChunk moddata is a viable storage layer before any design work depends on it.</summary>
+    public bool EnableChunkScarTracker { get; set; } = true;
+
+    /// <summary>In-game hours per one point of linear scar decay, applied at read time, never
+    /// ticked: decayedCount = max(0, storedCount - floor(elapsedHours / this)).</summary>
+    public double ChunkScarDecayHoursPerPoint { get; set; } = 24.0;
+
+    /// <summary>Code.Path prefixes (game domain only) counted as a log/trunk break. Vanilla has
+    /// no block family distinct from "log" for tree trunks (log.json's own texture is literally
+    /// named "treetrunk") -- one prefix by default, config-driven in case a mod adds a separate
+    /// trunk block.</summary>
+    public string[] ChunkScarLogBlockCodePrefixes { get; set; } = new[] { "log-" };
+
+    /// <summary>Code.Path prefixes (game domain only) counted toward the separate leaf-break
+    /// counter -- recorded but never merged into the scar count, to test whether leaf-break
+    /// volume (an axe felling one tree pops dozens of leaf blocks) would pollute a log-break
+    /// signal.</summary>
+    public string[] ChunkScarLeafBlockCodePrefixes { get; set; } = new[] { "leaves-", "leavesbranchy-" };
+
+    /// <summary>Neighbour sample radius, in map chunks, for /rfscar around and /rfscar bench.
+    /// Radius 1 = the 3x3 grid centered on the calling player's map chunk.</summary>
+    public int ChunkScarNeighborSampleRadius { get; set; } = 1;
 }
 
 /// <summary>How OrcStomachMultiplier combines with racialability's own maxSaturationFactor

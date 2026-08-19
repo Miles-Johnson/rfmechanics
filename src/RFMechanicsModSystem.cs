@@ -48,12 +48,24 @@ namespace rfmechanics
             // GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race), disabled -- see its class header.
             // api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(rfmechanics.BugRace.GoblinDigModifierBehavior));
 
-            // Apply Harmony patches
+            // Start(ICoreAPI) runs once per side (client + server), each on its own
+            // RFMechanicsModSystem instance -- in singleplayer both sides share one process, and
+            // Harmony patches the shared CLR MethodBase, so an unguarded PatchAll() from each
+            // side double-patches every prefix/postfix in this assembly. Confirmed in-game:
+            // ChunkScarBreakPatch double-counted a single block break before this guard existed.
+            // HasAnyPatches is a process-wide check, not per-Harmony-instance, so it's the right guard here.
             harmony = new Harmony(HarmonyId);
             try
             {
-                harmony.PatchAll(Assembly.GetExecutingAssembly());
-                api.Logger.Notification("[rfmechanics] Harmony patches applied successfully.");
+                if (!Harmony.HasAnyPatches(HarmonyId))
+                {
+                    harmony.PatchAll(Assembly.GetExecutingAssembly());
+                    api.Logger.Notification("[rfmechanics] Harmony patches applied successfully.");
+                }
+                else
+                {
+                    api.Logger.Notification("[rfmechanics] Harmony patches already applied by another side's ModSystem instance, skipping.");
+                }
             }
             catch (Exception ex)
             {
@@ -194,6 +206,7 @@ namespace rfmechanics
             RegisterRotAuraDiagCommand(api);
             RegisterRotAuraDebugCommand(api);
             RegisterElfStepHeightToggleCommand(api);
+            RegisterChunkScarCommand(api);
         }
 
         /// <summary>Server-side counterpart to the client hotkey (RegisterElfStepHeightHotkey) --
@@ -219,6 +232,222 @@ namespace rfmechanics
                         player.Entity.WatchedAttributes.SetBool("rf-elf-stepheight-enabled", next);
 
                         return TextCommandResult.Success(string.Format("Elf step height boost {0}.", next ? "enabled" : "disabled"));
+                    })
+                .EndSubCommand();
+        }
+
+        /// <summary>Diagnostic-only chunk scar tracker commands (RFMechanicsConfig.
+        /// EnableChunkScarTracker, ChunkScarTracker, ChunkScarBreakPatch). "here"/"around"/
+        /// "bench"/"rate" only read; "selftest" writes then immediately removes its own
+        /// dedicated key, net no persisted change. "reset" is the only subcommand that leaves
+        /// persisted state mutated, so it alone is bumped to root privilege, overriding the
+        /// parent's chat-level default -- same shape as /rfphase0's per-command root gate but
+        /// scoped to just one subcommand here since the rest are effectively read-only.</summary>
+        private void RegisterChunkScarCommand(ICoreServerAPI api)
+        {
+            api.ChatCommands.Create("rfscar")
+                .WithDescription("Diagnostic-only chunk scar tracker (no gameplay effect) -- IMapChunk moddata persistence and read-cost checks.")
+                .RequiresPrivilege(Privilege.chat)
+                .BeginSubCommand("here")
+                    .WithDescription("Print scar and leaf counts (raw, decayed, hours since last write) for the calling player's current map chunk.")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var cfg = Config;
+                        if (cfg == null)
+                            return TextCommandResult.Success("Config not loaded.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        int cx = ChunkScarTracker.ToChunkCoord(pos.X);
+                        int cz = ChunkScarTracker.ToChunkCoord(pos.Z);
+                        double nowHours = player.Entity.World.Calendar.TotalHours;
+                        var ba = api.World.BlockAccessor;
+
+                        string FormatOne(string label, string key)
+                        {
+                            var status = ChunkScarTracker.TryGetRaw(ba, cx, cz, key, out ChunkScarData? data);
+                            if (status == ChunkScarCellStatus.Unloaded)
+                                return string.Format("{0}: map chunk not resident", label);
+                            if (status == ChunkScarCellStatus.AbsentKey)
+                                return string.Format("{0}: never recorded", label);
+
+                            int decayed = ChunkScarTracker.ComputeDecayed(data!, nowHours, cfg.ChunkScarDecayHoursPerPoint);
+                            double sinceHours = Math.Max(0.0, nowHours - data!.LastWriteHours);
+                            return string.Format("{0}: raw={1} decayed={2} hoursSinceLastWrite={3:F2}", label, data.Count, decayed, sinceHours);
+                        }
+
+                        string msg = string.Format("mapChunk=({0},{1})\n{2}\n{3}",
+                            cx, cz, FormatOne("scar", ChunkScarTracker.ScarKey), FormatOne("leaf", ChunkScarTracker.LeafScarKey));
+                        return TextCommandResult.Success(msg);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("around")
+                    .WithDescription("Print a grid of decayed scar values for the calling player's current map chunk and its neighbours (radius from ChunkScarNeighborSampleRadius).")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var cfg = Config;
+                        if (cfg == null)
+                            return TextCommandResult.Success("Config not loaded.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        int cx = ChunkScarTracker.ToChunkCoord(pos.X);
+                        int cz = ChunkScarTracker.ToChunkCoord(pos.Z);
+                        double nowHours = player.Entity.World.Calendar.TotalHours;
+                        int radius = cfg.ChunkScarNeighborSampleRadius;
+                        var ba = api.World.BlockAccessor;
+
+                        ChunkScarSample[,] grid = ChunkScarTracker.SampleGrid(ba, cx, cz, radius, nowHours, cfg.ChunkScarDecayHoursPerPoint, ChunkScarTracker.ScarKey);
+
+                        var sb = new System.Text.StringBuilder();
+                        sb.AppendFormat("Decayed scar grid, mapChunk=({0},{1}) radius={2} (U=unloaded, .=never recorded):\n", cx, cz, radius);
+                        for (int dz = -radius; dz <= radius; dz++)
+                        {
+                            var rowParts = new string[radius * 2 + 1];
+                            for (int dx = -radius; dx <= radius; dx++)
+                            {
+                                ChunkScarSample sample = grid[dx + radius, dz + radius];
+                                rowParts[dx + radius] = sample.Status switch
+                                {
+                                    ChunkScarCellStatus.Unloaded => "U",
+                                    ChunkScarCellStatus.AbsentKey => ".",
+                                    _ => sample.DecayedCount.ToString()
+                                };
+                            }
+                            sb.AppendLine(string.Join(" ", rowParts));
+                        }
+
+                        return TextCommandResult.Success(sb.ToString());
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("bench")
+                    .WithDescription("Run the neighbour-grid read 1000 times and report total/mean cost, plus how many sampled cells were unloaded (a cheap read that would make the timing look artificially fast).")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var cfg = Config;
+                        if (cfg == null)
+                            return TextCommandResult.Success("Config not loaded.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        int cx = ChunkScarTracker.ToChunkCoord(pos.X);
+                        int cz = ChunkScarTracker.ToChunkCoord(pos.Z);
+                        double nowHours = player.Entity.World.Calendar.TotalHours;
+                        int radius = cfg.ChunkScarNeighborSampleRadius;
+                        var ba = api.World.BlockAccessor;
+
+                        const int iterations = 1000;
+
+                        // Warmup excluded from the timed loop -- first-touch cost, not steady-state read cost.
+                        ChunkScarTracker.SampleGrid(ba, cx, cz, radius, nowHours, cfg.ChunkScarDecayHoursPerPoint, ChunkScarTracker.ScarKey);
+
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        for (int i = 0; i < iterations; i++)
+                        {
+                            ChunkScarTracker.SampleGrid(ba, cx, cz, radius, nowHours, cfg.ChunkScarDecayHoursPerPoint, ChunkScarTracker.ScarKey);
+                        }
+                        sw.Stop();
+
+                        double totalMs = sw.Elapsed.TotalMilliseconds;
+                        double meanMicrosPerRead = sw.Elapsed.TotalMicroseconds / iterations;
+
+                        // Counted once, untimed, after the loop -- chunk residency doesn't change
+                        // within a millisecond-scale benchmark, and counting per-iteration would
+                        // pollute the very number being measured.
+                        ChunkScarSample[,] sampleGrid = ChunkScarTracker.SampleGrid(ba, cx, cz, radius, nowHours, cfg.ChunkScarDecayHoursPerPoint, ChunkScarTracker.ScarKey);
+                        int unloadedCells = 0;
+                        int totalCells = 0;
+                        foreach (ChunkScarSample sample in sampleGrid)
+                        {
+                            totalCells++;
+                            if (sample.Status == ChunkScarCellStatus.Unloaded) unloadedCells++;
+                        }
+
+                        int gridSide = radius * 2 + 1;
+                        return TextCommandResult.Success(string.Format(
+                            "{0}x{0} neighbour read x{1}: totalMs={2:F3} meanMicrosPerRead={3:F3} unloadedCells={4}/{5} (unloaded reads are cheap -- a fast mean with many unloaded cells is not a real perf number)",
+                            gridSide, iterations, totalMs, meanMicrosPerRead, unloadedCells, totalCells));
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("reset")
+                    .WithDescription("Clear the scar and leaf counters for the calling player's current map chunk.")
+                    .RequiresPrivilege(Privilege.root)
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        int cx = ChunkScarTracker.ToChunkCoord(pos.X);
+                        int cz = ChunkScarTracker.ToChunkCoord(pos.Z);
+                        var ba = api.World.BlockAccessor;
+
+                        ChunkScarTracker.Reset(ba, cx, cz, ChunkScarTracker.ScarKey);
+                        ChunkScarTracker.Reset(ba, cx, cz, ChunkScarTracker.LeafScarKey);
+
+                        return TextCommandResult.Success(string.Format("Cleared scar and leaf counters for mapChunk=({0},{1}).", cx, cz));
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("rate")
+                    .WithDescription("Print raw count, first/most-recent break hour, and elapsed hours between them, separately for scar and leaf, for the calling player's current map chunk.")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        int cx = ChunkScarTracker.ToChunkCoord(pos.X);
+                        int cz = ChunkScarTracker.ToChunkCoord(pos.Z);
+                        var ba = api.World.BlockAccessor;
+
+                        string FormatRate(string label, string key)
+                        {
+                            var status = ChunkScarTracker.TryGetRaw(ba, cx, cz, key, out ChunkScarData? data);
+                            if (status == ChunkScarCellStatus.Unloaded)
+                                return string.Format("{0}: map chunk not resident", label);
+                            if (status == ChunkScarCellStatus.AbsentKey)
+                                return string.Format("{0}: never recorded", label);
+
+                            double elapsed = Math.Max(0.0, data!.LastWriteHours - data.FirstWriteHours);
+                            return string.Format("{0}: count={1} firstBreakHour={2:F2} lastBreakHour={3:F2} elapsedHours={4:F2}",
+                                label, data.Count, data.FirstWriteHours, data.LastWriteHours, elapsed);
+                        }
+
+                        string msg = string.Format("mapChunk=({0},{1})\n{2}\n{3}",
+                            cx, cz, FormatRate("scar", ChunkScarTracker.ScarKey), FormatRate("leaf", ChunkScarTracker.LeafScarKey));
+                        return TextCommandResult.Success(msg);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("selftest")
+                    .WithDescription("Round-trip a sentinel through SetModdata/GetModdata on the current map chunk, and report this mod's own prefix/postfix count on Block.OnBlockBroken (expected 1/1 -- more means the PatchAll double-patch bug is back).")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var pos = player.Entity.Pos.AsBlockPos;
+                        bool roundTripOk = ChunkScarTracker.SelfTest(api.World, pos, out int byteLength);
+
+                        ChunkScarBreakPatch.CountOwnPatches(HarmonyId, out int prefixCount, out int postfixCount);
+                        string patchWarning = (prefixCount != 1 || postfixCount != 1)
+                            ? " WARNING: expected 1 prefix/1 postfix -- double-patch bug may be back, every scar count this session is suspect."
+                            : "";
+
+                        return TextCommandResult.Success(string.Format(
+                            "selftest: roundTrip={0} payloadBytes={1} | OnBlockBroken patches owned by rfmechanics: prefixes={2} postfixes={3}{4}",
+                            roundTripOk ? "PASS" : "FAIL", byteLength, prefixCount, postfixCount, patchWarning));
                     })
                 .EndSubCommand();
         }

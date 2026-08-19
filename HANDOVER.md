@@ -1,4 +1,116 @@
-# rfmechanics — handover (as of 2026-08-13)
+# rfmechanics — handover (as of 2026-08-19)
+
+**Chunk scar tracker hardening (2026-08-19, still diagnostic only, no gameplay effect).**
+Closes gaps found while re-reading the 2026-08-18 build against the decompiled 1.22 source
+before trusting it for a play session. No race gate, no buff scaling, no HUD added — none of
+this changes what the tracker is, only whether its numbers can be trusted.
+
+Confirmed by reading `reference/decompiled/1.22` source (file:line cited in-code):
+- `IBlockAccessor.GetMapChunk` returns `null` (not a sentinel, no throw) for an unloaded chunk —
+  `ServerWorldMap.cs:235-239`.
+- `IMapChunk.SetModdata`/`RemoveModdata` already call `MarkDirty()` internally —
+  `ServerMapChunk.cs:205-212`, `:238-242`. The tracker's own explicit `MarkDirty()` calls are
+  redundant, kept as belt-and-suspenders rather than relying on an implementation detail of a
+  type this mod doesn't own.
+- `Block.OnBlockBroken` fires from both the client (`ClientMain.OnPlayerTryDestroyBlock`, hit on
+  every ordinary survival break, not just Creative) and the server
+  (`ServerSystemBlockSimulation.cs:606`), with no engine-side side guard — confirming
+  `ChunkScarBreakPatch.Prefix`'s existing `world.Side != EnumAppSide.Server` check is
+  load-bearing, not defensive boilerplate; removing it would double-count every break in
+  singleplayer the same way the `PatchAll` bug did.
+- Grown/placed gate coverage: `log-*-grown-*` (`log.json`) is caught, confirmed directly at
+  `BlockLog.cs:18`. `bamboo-grown-*` (`BlockBamboo.cs:48-51`) is **missed** — its code doesn't
+  start with `"log-"`. Fern trees (`BlockFernTree`) have no grown/placed variant in code at all,
+  so no string-match gate can catch them regardless of prefix list. **Documented, not fixed** —
+  widening what counts as "trunk" is a design call for when a buff curve is actually being
+  built, not now. Open question, unresolved either way: whether a `log-resin-*` block (the
+  `type` variant also has a `"resin"` value, `ForestFloorSystem.cs:279`) is a naturally-grown
+  log that lost its `"grown"` type and would silently fall out of the gate.
+
+Confirmed by building (`dotnet build`, 0 errors, 37-warning baseline unchanged — new code added
+zero new warnings):
+- `ChunkScarBreakPatch.Postfix` now re-checks the block at `pos` against the pre-break `__state`
+  before recording — Postfix runs even if some other system (a block behavior, a protection mod)
+  cancelled the break inside `OnBlockBroken`, and without this check that would still count a
+  tree that's still standing.
+- `ChunkScarTracker`'s reads are now tri-state (`ChunkScarCellStatus`: `Unloaded`/`AbsentKey`/
+  `Value`) instead of collapsing "chunk not loaded" and "key never written" into the same
+  zero-count instance. `/rfscar here`/`around` print `U`/`.`/`never recorded` instead of ever
+  showing a `0` for either case — a real decayed-to-zero value still prints `0`.
+- `/rfscar bench` now runs an untimed warmup pass before the timed 1000x loop, and reports how
+  many of the sampled cells were `Unloaded` (a cheap read that would make the timing look
+  artificially fast) — counted once after the timed loop, not per-iteration, so the counting
+  logic itself doesn't pollute the number being measured.
+- `/rfscar rate` (new): raw count, first/most-recent break hour, elapsed hours between, reported
+  separately for scar and leaf. Needed a schema addition — `ChunkScarData.FirstWriteHours`
+  (`[ProtoMember(3)]`), set only on the raw stored `Count`'s 0→1 transition in `RecordBreak`.
+  Rule: this is the **raw stored count, not the decayed display value** — `ComputeDecayed` is
+  read-only and never writes back, so raw `Count` is 0 only right after `/rfscar reset` or
+  before any write has ever happened; a fully-decayed chunk keeps its true `FirstWriteHours`.
+- `/rfscar selftest` (new): writes a sentinel to a dedicated key
+  (`ChunkScarTracker.SelfTestKey`), reads it back via the same `SetModdata<T>`/`GetModdata<T>`
+  path the tracker uses, reports pass/fail plus the raw payload's byte length (via `IMapChunk`'s
+  `byte[] GetModdata(string)` overload), then cleans up its own key. Also reports
+  `ChunkScarBreakPatch.CountOwnPatches` — this mod's own prefix/postfix count on
+  `Block.OnBlockBroken` via `Harmony.GetPatchInfo`, owner-filtered so other mods' patches on the
+  same method don't skew it. Expected `1/1`; if it ever prints `2/2`, the `PatchAll` double-patch
+  bug is back and every number collected that session is suspect — catchable before collecting
+  data, not after.
+
+**Not verified at all this pass**: whether `BlockLogSection` (`log-section-*-grown-*`) is
+actually caught by the `"log-"` prefix gate — inferred from a third-party patch's path only, no
+literal code string was found to confirm its block-code convention matches `log.json`'s.
+
+**Still not confirmed in-game** (unchanged from 2026-08-18): unload/reload persistence,
+server-restart persistence, `/rfscar bench`'s actual numbers, and now also the new `rate`/
+`selftest` commands and the tri-state display. `/rfscar selftest`'s patch-count check exists
+specifically to de-risk the very first thing to check when the in-game session starts.
+
+---
+
+**Chunk scar tracker (2026-08-18, diagnostic only, no gameplay effect).** `ChunkScarTracker.cs`
+(storage/decay), `ChunkScarBreakPatch.cs` (Harmony prefix/postfix on `Block.OnBlockBroken`),
+`/rfscar` (`RFMechanicsModSystem.cs`, `here`/`around`/`bench`/`rate`/`selftest`/`reset`). Built
+to measure four assumptions
+before any real mechanic depends on them: does `IMapChunk` moddata survive unload/reload and a
+full server restart, what a 3x3 neighbour read costs, and whether VS tracks player-placed state
+for logs. Storage is `IMapChunk.SetModdata<T>`/`GetModdata<T>` (confirmed present on the 1.22.6
+API via `reference/decompiled/1.22`, not upstream master), key `"rfmechanics:scar"` for logs and
+a second independent key `"rfmechanics:scarleaf"` for leaves (never merged). `ChunkScarData` is a
+class (changed from an initial struct pass, 2026-08-18, before any in-game test) -- same shape
+as the archived `ForestCensusData`, which already round-tripped through this exact
+`SetModdata<T>`/`GetModdata<T>` path; a struct would have made the protobuf-net serializer an
+untested variable in a diagnostic whose whole job is testing moddata persistence, risking a
+false read on assumptions 1/2 that looks exactly like "moddata does not survive unload." Player-
+placed detection for logs is real but code-level, not per-instance: `log.json`'s `"type"`
+variantgroup is `["grown","placed"]`, so gating on `"-grown-"` (mirrors `ElfLeafDropPatch`'s leaf
+convention) excludes a log wall (200 `-placed-` logs stacked and broken) from the scar count.
+It deliberately does not distinguish worldgen origin from a player-planted sapling that grew
+naturally -- the scar measures standing wood removed from the column, not who planted the seed,
+so a grown tree felled counts either way; this is intended behavior, not a gap. **Build-verified
+only as of this entry** (`dotnet build`, 0 errors, 37-warning baseline unchanged) -- unload/
+reload persistence, server-restart persistence, and `/rfscar bench`'s actual numbers are all
+**not yet confirmed in-game.**
+
+**Mod-wide bug surfaced by this tracker, fixed same day (2026-08-18): every Harmony patch in
+rfmechanics was double-applied in singleplayer.** `RFMechanicsModSystem.Start(ICoreAPI)` runs
+once per side, each on its own `RFMechanicsModSystem` instance (`ModLoader.RunModPhase` creates
+a separate instance per `ModLoader`, one per side) -- in singleplayer both sides share one
+process, and Harmony patches the shared CLR `MethodBase`, so two unguarded `PatchAll()` calls
+(one from each side's `Start()`) registered every prefix/postfix in this assembly twice. First
+caught by the scar tracker: a single hand-broken leaf incremented the leaf counter by 2, not 1,
+100% reproducible. Root-caused via a background source-trace against
+`reference/decompiled/1.22` confirming the engine calls `Block.OnBlockBroken` exactly once per
+break (`ServerSystemBlockSimulation.cs:606`) -- the doubling was entirely on rfmechanics' side.
+Fixed by guarding `PatchAll` behind `Harmony.HasAnyPatches(HarmonyId)` (process-wide check, not
+per-instance) in `RFMechanicsModSystem.cs`. **This affected every registered Harmony patch in
+singleplayer, not just the scar tracker** -- any prior "confirmed working in-game" note for a
+mechanic whose patch *accumulates* rather than *idempotently sets* a value (drain-per-tick,
+flat bonuses added twice, etc.) was tested under this bug and may be worth a second look;
+mechanics that recompute an absolute value from scratch each call (e.g. `ClimbSpeedPatch`) were
+unaffected by the doubling regardless. Not audited mechanic-by-mechanic here -- flagging so a
+future session doesn't have to rediscover the mechanism if a stacking-looking bug turns up
+elsewhere. Rebuilt and redeployed 2026-08-18; not yet re-verified in-game.
 
 Current-state reference for a fresh context picking up this mod. For dated bug-fix history see
 `notes/race-mechanics/rfmechanics-2026-07-30-session-notes.md`, `notes/race-mechanics/rfmechanics-2026-08-04-session-notes.md`,
