@@ -236,8 +236,9 @@ namespace rfmechanics
                 .EndSubCommand();
         }
 
-        /// <summary>Diagnostic-only chunk scar tracker commands (RFMechanicsConfig.
-        /// EnableChunkScarTracker, ChunkScarTracker, ChunkScarBreakPatch). "here"/"around"/
+        /// <summary>Chunk scar tracker commands (RFMechanicsConfig.
+        /// ChunkScarTrackingEnabled, ChunkScarTracker, ChunkScarBreakPatch) -- archived passive
+        /// data collector, see ChunkScarTracker.cs's header. "here"/"around"/
         /// "bench"/"rate" only read; "selftest" writes then immediately removes its own
         /// dedicated key, net no persisted change. "reset" is the only subcommand that leaves
         /// persisted state mutated, so it alone is bumped to root privilege, overriding the

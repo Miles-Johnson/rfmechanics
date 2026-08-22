@@ -1,4 +1,37 @@
-# rfmechanics — handover (as of 2026-08-19)
+# rfmechanics — handover (as of 2026-08-22)
+
+**Chunk scar tracker: elf-buff wiring planned, approved, then cancelled before implementation
+(2026-08-22).** A design to scale forage yield (`forageDropRate`), wild-crop yield
+(`wildCropDropRate`), and tree-proximity walkspeed by a continuous multiplier derived from the
+log-break scar count was fully planned (own-map-chunk-only read, a compensating second Stats
+source to shrink forage/wild-crop's trait-file bonus without touching the trait file itself, a
+`CharacterSystem.TraitsByCode` read to get the trait's flat delta as a known constant, linear
+curve to a floor) and approved, then cancelled on review: this scope belongs in a future
+standalone mod, not rfmechanics. **No `ElfChunkScarBuffBehavior` was written, no new Stats
+source exists, `RFTreeProximityBehavior` is untouched.** The full cancelled design is preserved
+in `notes/race-mechanics/chunk-scar-archived.md` for whoever eventually builds that standalone
+mod.
+
+The tracker itself (`ChunkScarTracker.cs`/`ChunkScarBreakPatch.cs`) stays registered and active
+as a passive data collector with no consumer by design — same relocation precedent as the
+goblin dig-speed/spit-packed-earth extraction (`src/BugRace/`, Phase G3): defuse references,
+don't delete code. `ChunkScarTracker.cs`'s header now carries an explicit "no gameplay consumer
+by design" boundary marker so a future session doesn't mistake a live tracker for an unfinished
+feature and wire it up without reading the archived doc first.
+
+One config field renamed: `EnableChunkScarTracker` → `ChunkScarTrackingEnabled` (same default
+`true`, same semantics — gates `ChunkScarBreakPatch`'s write path only, never `/rfscar`'s reads).
+The live deployed `ModConfig/rfmechanics.json` still has the old key as of this pass; it
+self-heals on the next load/store cycle the same way the `RangedAccDelta`/`BluntCrushResistDelta`
+rename did (see `notes/race-mechanics/README.md`'s footnote 1) — `LoadConfig` always calls
+`api.StoreModConfig` after loading, so the old key is silently dropped and the new one written
+with its default. No risk here specifically: the live value was already `true`, matching the new
+default.
+
+Build: `dotnet build -c Release` after deleting `bin\Release\Mods\` — 0 errors, 37 warnings,
+same baseline as every prior entry in this file. `python tools/docs-check.py` run clean against
+this change (same 35 pre-existing findings as before this pass, all unrelated to chunk scar —
+see the tool's own caveat about bulk-touched mtimes from the 2026-07-29 reorg).
 
 **Chunk scar tracker hardening (2026-08-19, still diagnostic only, no gameplay effect).**
 Closes gaps found while re-reading the 2026-08-18 build against the decompiled 1.22 source

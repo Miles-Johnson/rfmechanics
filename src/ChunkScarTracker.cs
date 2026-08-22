@@ -50,13 +50,22 @@ namespace rfmechanics
         }
     }
 
-    /// <summary>Diagnostic-only chunk scar counter (no gameplay effect anywhere -- see
-    /// RFMechanicsConfig.EnableChunkScarTracker and /rfscar). Exists to measure four assumptions
-    /// before any design work depends on them: does IMapChunk moddata survive unload/restart,
-    /// what does a 3x3 neighbour read cost, and does VS track player-placed state for logs.
-    /// Decay is a pure function of the stored struct and the current calendar hour, computed at
-    /// read time in ComputeDecayed -- there is no tick loop and no in-memory cache, so a map
-    /// chunk that has been unloaded for a week decays identically to one read every tick.</summary>
+    /// <summary>Chunk scar counter (RFMechanicsConfig.ChunkScarTrackingEnabled gates the write
+    /// path; /rfscar reads it). Originally built to measure four assumptions before any design
+    /// work depended on them: does IMapChunk moddata survive unload/restart, what does a 3x3
+    /// neighbour read cost, and does VS track player-placed state for logs. Decay is a pure
+    /// function of the stored struct and the current calendar hour, computed at read time in
+    /// ComputeDecayed -- there is no tick loop and no in-memory cache, so a map chunk that has
+    /// been unloaded for a week decays identically to one read every tick.
+    ///
+    /// ARCHIVED BOUNDARY (2026-08-22, see notes/race-mechanics/chunk-scar-archived.md):
+    /// - This system has no gameplay consumer by design. It only counts and decays.
+    /// - Persistence across chunk unload and server restart is UNVERIFIED. Any future consumer
+    ///   must confirm it (see the archived doc's smoke-test checklist) before depending on it.
+    /// - The intended consumer is a future standalone mod, not rfmechanics. An elf-buff wiring
+    ///   design against this tracker was planned and approved, then cancelled before
+    ///   implementation -- the full cancelled design is preserved in the archived doc. Do not
+    ///   read a live tracker with no consumer as an unfinished feature and wire it up here.</summary>
     public static class ChunkScarTracker
     {
         public const string ScarKey = "rfmechanics:scar";

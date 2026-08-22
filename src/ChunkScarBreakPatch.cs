@@ -7,8 +7,8 @@ using Vintagestory.API.MathTools;
 
 namespace rfmechanics
 {
-    /// <summary>Diagnostic-only write path for RFMechanicsConfig.EnableChunkScarTracker --
-    /// increments a moddata counter, no gameplay effect. Prefix/postfix __state shape mirrors
+    /// <summary>Write path for RFMechanicsConfig.ChunkScarTrackingEnabled -- increments a
+    /// moddata counter, no gameplay effect (see ChunkScarTracker.cs's header). Prefix/postfix __state shape mirrors
     /// the archived ElfForestCensusInvalidationPatch: the pre-break Block is captured in Prefix
     /// since it's already gone by Postfix time in the normal case; Postfix re-checks the block
     /// at pos against __state before counting, so a break some other system cancelled doesn't
@@ -37,7 +37,7 @@ namespace rfmechanics
             try
             {
                 var cfg = RFMechanicsModSystem.Config;
-                if (cfg == null || !cfg.EnableChunkScarTracker) return;
+                if (cfg == null || !cfg.ChunkScarTrackingEnabled) return;
 
                 __state = world.BlockAccessor.GetBlock(pos);
             }
@@ -55,7 +55,7 @@ namespace rfmechanics
             try
             {
                 var cfg = RFMechanicsModSystem.Config;
-                if (cfg == null || !cfg.EnableChunkScarTracker) return;
+                if (cfg == null || !cfg.ChunkScarTrackingEnabled) return;
 
                 // Postfix runs even if something else (a block behavior, a protection mod)
                 // cancelled the break inside OnBlockBroken -- confirm the block at pos actually

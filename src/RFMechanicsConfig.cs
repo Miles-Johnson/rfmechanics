@@ -724,12 +724,13 @@ public class RFMechanicsConfig
     /// and comb-filter into sounding like one source.</summary>
     public double OreSongPitchJitter { get; set; } = 0.05;
 
-    // ── Chunk scar tracker (diagnostic only) ──
+    // ── Chunk scar tracker (passive data collector, no gameplay consumer -- see
+    // ChunkScarTracker.cs's header and notes/race-mechanics/chunk-scar-archived.md) ──
 
-    /// <summary>Master toggle for ChunkScarBreakPatch's write path and the /rfscar command's
-    /// read path. Diagnostic-only: no gameplay effect anywhere, exists to measure whether
-    /// IMapChunk moddata is a viable storage layer before any design work depends on it.</summary>
-    public bool EnableChunkScarTracker { get; set; } = true;
+    /// <summary>Master toggle for ChunkScarBreakPatch's write path only -- false makes the
+    /// Harmony postfix return immediately with no moddata written. Does not gate /rfscar's
+    /// read subcommands; they always report whatever is already on disk.</summary>
+    public bool ChunkScarTrackingEnabled { get; set; } = true;
 
     /// <summary>In-game hours per one point of linear scar decay, applied at read time, never
     /// ticked: decayedCount = max(0, storedCount - floor(elapsedHours / this)).</summary>
