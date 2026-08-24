@@ -19,6 +19,8 @@ namespace rfmechanics
     public static class GoblinSpitChargeGrantPatch
     {
         private const string SpitChargesKey = "rfmechanics:spitCharges";
+        private const string RotFliesKey = "rfmechanics:rotFlies";
+        private const string RotFliesUpdatedHoursKey = "rfmechanics:rotFliesUpdatedHours";
         private static bool loggedException = false;
 
         [HarmonyPostfix]
@@ -30,7 +32,8 @@ namespace rfmechanics
                 if (byEntity.World.Side != EnumAppSide.Server) return;
 
                 var cfg = RFMechanicsModSystem.Config;
-                if (cfg == null || !cfg.EnableGoblinSpitCharges) return;
+                if (cfg == null) return;
+                if (!cfg.EnableGoblinSpitCharges && !cfg.EnableGoblinRotFlies) return;
 
                 // Mirrors tryEatStop's own completion gate -- a cancelled bite shouldn't grant a charge.
                 if (secondsUsed < 0.95f) return;
@@ -52,9 +55,17 @@ namespace rfmechanics
 
                 if (!charSys.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
 
-                int current = player.WatchedAttributes.GetInt(SpitChargesKey, 0);
-                int granted = Math.Min(current + cfg.SpitChargesPerRot, cfg.SpitChargeCap);
-                player.WatchedAttributes.SetInt(SpitChargesKey, granted);
+                if (cfg.EnableGoblinSpitCharges)
+                {
+                    int current = player.WatchedAttributes.GetInt(SpitChargesKey, 0);
+                    int granted = Math.Min(current + cfg.SpitChargesPerRot, cfg.SpitChargeCap);
+                    player.WatchedAttributes.SetInt(SpitChargesKey, granted);
+                }
+
+                if (cfg.EnableGoblinRotFlies)
+                {
+                    GrantRotFlies(player, cfg);
+                }
             }
             catch (Exception ex)
             {
@@ -65,6 +76,26 @@ namespace rfmechanics
                         "[rfmechanics] Exception in GoblinSpitChargeGrantPatch: {0}", ex);
                 }
             }
+        }
+
+        /// <summary>
+        /// Decay-then-add, same shape as dietsetup's RotIntakeAccrual but a deliberately separate
+        /// signal: rotIntake accrues from any imperfectly fresh food and sits near 0.5 in steady
+        /// state, so it can't express "this goblin has eaten no rot." This keys on literal
+        /// game:rot only (already enforced by the caller) and never reads dietsetup:rotIntake.
+        /// </summary>
+        private static void GrantRotFlies(EntityPlayer player, RFMechanicsConfig cfg)
+        {
+            var wa = player.WatchedAttributes;
+            double nowHours = player.World.Calendar.TotalHours;
+            double lastHours = wa.GetDouble(RotFliesUpdatedHoursKey, nowHours);
+            double raw = wa.GetDouble(RotFliesKey, 0.0);
+
+            double decayed = raw * Math.Pow(0.5, Math.Max(0.0, nowHours - lastHours) / cfg.GoblinRotFliesHalfLifeHours);
+            double next = Math.Min(cfg.GoblinRotFliesCap, decayed + cfg.GoblinRotFliesPerRot);
+
+            wa.SetDouble(RotFliesKey, next);
+            wa.SetDouble(RotFliesUpdatedHoursKey, nowHours);
         }
     }
 }

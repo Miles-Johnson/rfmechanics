@@ -688,6 +688,93 @@ public class RFMechanicsConfig
     /// single load; lowering the global cap to close that gap would cost the other six blocks room instead.</summary>
     public double SpitRepairGain { get; set; } = 0.125;
 
+    // ── Goblin rot flies (Phase G4) ──
+
+    /// <summary>Master toggle for the rotFlies signal write (GoblinSpitChargeGrantPatch) and the
+    /// vanilla-particle aura fly population it drives.</summary>
+    public bool EnableGoblinRotFlies { get; set; } = true;
+
+    /// <summary>Master toggle for the exact-count spit fly renderer.</summary>
+    public bool EnableGoblinSpitFlies { get; set; } = true;
+
+    /// <summary>Decay half-life (in-game calendar hours) for rfmechanics:rotFlies. Matched to
+    /// GoblinRotAuraIntakeHalfLifeHours (48h, 2026-08-23) so flies don't decay to near-zero
+    /// while the invisible dietsetup:rotIntake aura is still near full -- the signal itself
+    /// stays distinct (still driven by GoblinSpitChargeGrantPatch.GrantRotFlies).</summary>
+    public double GoblinRotFliesHalfLifeHours { get; set; } = 48.0;
+
+    /// <summary>rfmechanics:rotFlies gained per qualifying game:rot eat, same gate as spit
+    /// charges. 3 rots (0.34*3 ~= 1.02) fills both the spit charge cap and this signal --
+    /// intended, not coincidental.</summary>
+    public double GoblinRotFliesPerRot { get; set; } = 0.34;
+
+    /// <summary>Ceiling on rfmechanics:rotFlies. Raised 1.0 -> 5.0 (2026-08-23) alongside the
+    /// half-life match above -- at 48h, historical eating persists far longer, so the old cap
+    /// saturated a heavy-eater and a light-eater goblin at the same fly count. TUNING: not locked.</summary>
+    public double GoblinRotFliesCap { get; set; } = 5.0;
+
+    /// <summary>Aura fly count at rotFlies == 0 (still nonzero -- a goblin who hasn't eaten rot
+    /// recently isn't fly-free, just sparse).</summary>
+    public int GoblinRotFliesCountMin { get; set; } = 10;
+
+    /// <summary>Aura fly count at rotFlies == 1 (cap).</summary>
+    public int GoblinRotFliesCountMax { get; set; } = 150;
+
+    /// <summary>Below this rotFlies value, the aura fly population stops spawning entirely
+    /// rather than trailing off to an unreadable handful.</summary>
+    public double GoblinRotFliesFloor { get; set; } = 0.02;
+
+    /// <summary>Aura fly quad size, in blocks.</summary>
+    public double GoblinRotFliesSize { get; set; } = 0.08;
+
+    /// <summary>Period, in seconds, of the slow sine that breathes the aura fly spawn radius.</summary>
+    public double GoblinRotFliesBreathPeriod { get; set; } = 20.0;
+
+    /// <summary>Amplitude of the breathing sine, as a fraction of the nominal spawn radius.</summary>
+    public double GoblinRotFliesBreathAmplitude { get; set; } = 0.10;
+
+    /// <summary>Time constant, in seconds, for the aura fly cloud's centroid to lag a moving
+    /// goblin. Exposed as a live-tunable via /rfflies for in-game feel tuning.</summary>
+    public double GoblinRotFliesLagSeconds { get; set; } = 2.0;
+
+    /// <summary>Aura fly particle lifetime, in seconds.</summary>
+    public double GoblinRotFliesLifeSeconds { get; set; } = 2.0;
+
+    /// <summary>Range, in blocks, for both fly populations' goblin scan (Step 5) -- shared so aura
+    /// and spit flies iterate the same goblin set.</summary>
+    public double GoblinRotFliesRange { get; set; } = 32.0;
+
+    /// <summary>Spit fly quad size, in blocks. Halved from the original 0.15 (2026-08-22 tuning
+    /// pass) -- the original read oversized once the crossed-quad mesh gave the flies real
+    /// silhouette instead of a flat cutout.</summary>
+    public double GoblinSpitFliesSize { get; set; } = 0.075;
+
+    /// <summary>Spit fly cloud horizontal radius, in blocks, centred on the goblin's body
+    /// midpoint. Set to match More Bugs' RotPlayerFlyRoamRadiusBlocks default (2026-08-22) --
+    /// the reference point the user asked for is the "carrying rot in inventory" fly cloud
+    /// from that mod, not a from-scratch feel.</summary>
+    public double GoblinSpitFliesRadius { get; set; } = 4.5;
+
+    /// <summary>Spit fly cloud vertical half-extent, in blocks, around the goblin's body
+    /// midpoint. Set to match More Bugs' RotPlayerFlyVerticalRangeBlocks default (2026-08-22),
+    /// same rationale as GoblinSpitFliesRadius.</summary>
+    public double GoblinSpitFliesVerticalExtent { get; set; } = 0.45;
+
+    /// <summary>Spit fly retarget interval, in seconds. Slowed 0.3 -> 2.0 (2026-08-22 tuning
+    /// pass) to match the aura population's pace -- vanilla's own RandomVelocityChange jitter
+    /// (traced in the decompiled ParticleGeneric.cs) resets on roughly a 2s cadence, so this
+    /// keeps both populations reading as the same kind of insect rather than the spit flies
+    /// darting.</summary>
+    public double GoblinSpitFliesRetargetSeconds { get; set; } = 2.0;
+
+    /// <summary>Time constant, in seconds, for the spit fly cloud centroid to lag the goblin.
+    /// Tight (&lt;=1.0s) by design -- these are a body-relative indicator, not ambient atmosphere.</summary>
+    public double GoblinSpitFliesLagSeconds { get; set; } = 1.0;
+
+    /// <summary>Fade-in/fade-out duration, in seconds, when a spit fly spawns or despawns on a
+    /// charge count change. Instant appearance reads as a bug at this render distance.</summary>
+    public double GoblinSpitFliesFadeSeconds { get; set; } = 0.4;
+
     // ── Elf leaf gathering (Phase G2) ──
 
     /// <summary>Master toggle for the Elf leaf self-drop (ElfLeafDropPatch). Appends the

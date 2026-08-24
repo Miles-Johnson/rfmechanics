@@ -79,6 +79,59 @@ namespace rfmechanics
         {
             base.StartClientSide(api);
             RegisterElfStepHeightHotkey(api);
+            RegisterFliesLagCommand(api);
+        }
+
+        /// <summary>Separate command (not a /rfflies subcommand) and client-side, not
+        /// server-side: every value here only feeds client-only renderers (GoblinAuraFliesModSystem,
+        /// GoblinSpitFliesRenderer). A server-registered chat command shadows any client-registered
+        /// command of the same name (the client resolves locally first), so a client-only tuning
+        /// knob under the /rfflies name would either never fire or would swallow /rfflies'
+        /// server-side diagnostic dump -- distinct names sidestep that entirely. Four subcommands
+        /// (2026-08-22 tuning pass, up from the original single aura-lag value) so the whole spit
+        /// fly envelope can be tuned in one session without a rebuild.</summary>
+        private void RegisterFliesLagCommand(ICoreClientAPI api)
+        {
+            CommandArgumentParsers parsers = api.ChatCommands.Parsers;
+
+            api.ChatCommands.Create("rfflieslag")
+                .WithDescription("Live-tune Phase G4 fly rendering values. Client-side only, not persisted.")
+                .BeginSubCommand("aura")
+                    .WithDescription("Get/set GoblinRotFliesLagSeconds (aura fly cloud centroid lag, seconds).")
+                    .WithArgs(parsers.OptionalFloat("seconds"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesLagSeconds", () => Config?.GoblinRotFliesLagSeconds, v => Config!.GoblinRotFliesLagSeconds = v))
+                .EndSubCommand()
+                .BeginSubCommand("size")
+                    .WithDescription("Get/set GoblinSpitFliesSize (spit fly quad size, blocks).")
+                    .WithArgs(parsers.OptionalFloat("blocks"))
+                    .HandleWith(args => TuneFloat(args, "GoblinSpitFliesSize", () => Config?.GoblinSpitFliesSize, v => Config!.GoblinSpitFliesSize = v))
+                .EndSubCommand()
+                .BeginSubCommand("radius")
+                    .WithDescription("Get/set GoblinSpitFliesRadius (spit fly cloud horizontal radius, blocks).")
+                    .WithArgs(parsers.OptionalFloat("blocks"))
+                    .HandleWith(args => TuneFloat(args, "GoblinSpitFliesRadius", () => Config?.GoblinSpitFliesRadius, v => Config!.GoblinSpitFliesRadius = v))
+                .EndSubCommand()
+                .BeginSubCommand("vext")
+                    .WithDescription("Get/set GoblinSpitFliesVerticalExtent (spit fly cloud vertical half-extent, blocks).")
+                    .WithArgs(parsers.OptionalFloat("blocks"))
+                    .HandleWith(args => TuneFloat(args, "GoblinSpitFliesVerticalExtent", () => Config?.GoblinSpitFliesVerticalExtent, v => Config!.GoblinSpitFliesVerticalExtent = v))
+                .EndSubCommand();
+        }
+
+        /// <summary>Shared get/set body for /rfflieslag's four subcommands -- one implementation
+        /// instead of four near-identical HandleWith blocks.</summary>
+        private static TextCommandResult TuneFloat(TextCommandCallingArgs args, string fieldName, Func<double?> get, Action<double> set)
+        {
+            double? current = get();
+            if (current == null)
+                return TextCommandResult.Success("Config not loaded.");
+
+            if (args.Parsers[0].IsMissing)
+                return TextCommandResult.Success(string.Format("{0}={1:F3}", fieldName, current.Value));
+
+            double value = (float)args[0];
+            set(value);
+            return TextCommandResult.Success(string.Format("{0} set to {1:F3} (this session only, not saved to rfmechanics.json)", fieldName, value));
         }
 
         /// <summary>200ms client-side debounce so a held key doesn't spam the server with
@@ -207,6 +260,7 @@ namespace rfmechanics
             RegisterRotAuraDebugCommand(api);
             RegisterElfStepHeightToggleCommand(api);
             RegisterChunkScarCommand(api);
+            RegisterFliesDiagCommand(api);
         }
 
         /// <summary>Server-side counterpart to the client hotkey (RegisterElfStepHeightHotkey) --
@@ -483,6 +537,46 @@ namespace rfmechanics
                     string msg = string.Format(
                         "rawRotIntake={0:F4} elapsedHoursSinceWrite={1:F2} liveDecayedIntake={2:F4} -> radius={3} intensity={4:F4} (RadiusMin={5} RadiusMax={6} halfLifeHours={7:F1})",
                         raw, elapsedHours, t, radius, intensity, cfg.GoblinRotAuraRadiusMin, cfg.GoblinRotAuraRadiusMax, cfg.GoblinRotAuraIntakeHalfLifeHours);
+
+                    return TextCommandResult.Success(msg);
+                });
+        }
+
+        /// <summary>Fly diagnostics (Phase G4): a goblin can't judge his own visible fly cloud
+        /// well, so he needs the numbers directly -- rotFlies (raw/live), rotIntake (live), spit
+        /// charges, and the resulting aura/spit fly counts + aura radius, all for the calling
+        /// player. Server-side (same convention as /rfrotdiag) since it only reads
+        /// WatchedAttributes, no client-only state involved.</summary>
+        private void RegisterFliesDiagCommand(ICoreServerAPI api)
+        {
+            api.ChatCommands.Create("rfflies")
+                .WithDescription("Dump goblin fly diagnostics (rotFlies, rotIntake, spit charges, resulting fly counts/radius) for the calling player")
+                .RequiresPrivilege(Privilege.chat)
+                .HandleWith(args =>
+                {
+                    IPlayer player = args.Caller.Player;
+                    if (player == null)
+                        return TextCommandResult.Success("No player context.");
+
+                    var cfg = Config;
+                    if (cfg == null)
+                        return TextCommandResult.Success("Config not loaded.");
+
+                    Entity entity = player.Entity;
+                    var wa = entity.WatchedAttributes;
+
+                    double rotFliesRaw = wa.GetDouble("rfmechanics:rotFlies", 0.0);
+                    float rotFliesLive = GameMath.Clamp(GoblinRotFliesShared.ReadLiveRotFlies(entity, cfg), 0f, (float)cfg.GoblinRotFliesCap);
+                    float rotIntakeLive = GameMath.Clamp(GoblinRotAuraBehavior.ReadLiveRotIntake(entity, cfg), 0f, 1f);
+                    int spitCharges = wa.GetInt("rfmechanics:spitCharges", 0);
+
+                    int auraCount = (int)Math.Round(GameMath.Lerp(cfg.GoblinRotFliesCountMin, cfg.GoblinRotFliesCountMax, rotFliesLive / (float)cfg.GoblinRotFliesCap));
+                    (int auraRadius, _) = GoblinRotAuraBehavior.ComputeShape(cfg, rotIntakeLive);
+                    int spitFlyCount = GameMath.Clamp(spitCharges, 0, cfg.SpitChargeCap);
+
+                    string msg = string.Format(
+                        "rotFliesRaw={0:F4} rotFliesLive={1:F4} rotIntakeLive={2:F4} spitCharges={3} -> auraFlyCount={4} auraRadius={5} spitFlyCount={6}",
+                        rotFliesRaw, rotFliesLive, rotIntakeLive, spitCharges, auraCount, auraRadius, spitFlyCount);
 
                     return TextCommandResult.Success(msg);
                 });
