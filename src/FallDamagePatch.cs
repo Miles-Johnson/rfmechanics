@@ -41,26 +41,15 @@ namespace rfmechanics
                 if (cfg == null)
                     return;
 
-                // No class = not this race; overrides HasTrait's null-class-returns-true default.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null)
-                    return;
 
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return;
-
-                if (cfg.EnableFallDamageReduction && charSys.HasTrait(iplayer, cfg.ElfTraitCode))
+                if (cfg.EnableFallDamageReduction && RaceTraits.HasTrait(iplayer, cfg.ElfTraitCode))
                 {
                     damage *= (float)(1.0 - cfg.FallDamageReductionFactor);
                     return;
                 }
 
-                if (cfg.EnableGoblinFallDamageReduction && charSys.HasTrait(iplayer, cfg.GoblinTraitCode))
+                if (cfg.EnableGoblinFallDamageReduction && RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode))
                 {
                     damage *= (float)(1.0 - cfg.GoblinFallDamageReductionFactor);
                     return;
