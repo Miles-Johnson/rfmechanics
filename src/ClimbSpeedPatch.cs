@@ -74,11 +74,7 @@ namespace rfmechanics
                     return;
                 }
 
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return;
-
-                if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
+                if (!RaceTraits.HasTrait(iplayer, cfg.DwarfTraitCode))
                     return;
 
                 float factor2 = (float)(1.0 + cfg.ClimbSpeedFactor);
@@ -141,15 +137,7 @@ namespace rfmechanics
                     if (iplayer?.Entity == null)
                         return;
 
-                    string charClass = entity.WatchedAttributes.GetString("characterClass");
-                    if (string.IsNullOrEmpty(charClass))
-                        return;
-
-                    var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                    if (charSys == null)
-                        return;
-
-                    if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
+                    if (!RaceTraits.HasTrait(iplayer, cfg.DwarfTraitCode))
                         return;
 
                     ApplyClimbScale(behavior, attributes, factor);
@@ -195,15 +183,7 @@ namespace rfmechanics
                     if (iplayer?.Entity == null)
                         return;
 
-                    string charClass = entity.WatchedAttributes.GetString("characterClass");
-                    if (string.IsNullOrEmpty(charClass))
-                        return;
-
-                    var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                    if (charSys == null)
-                        return;
-
-                    if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
+                    if (!RaceTraits.HasTrait(iplayer, cfg.DwarfTraitCode))
                         return;
 
                     ApplyClimbScale(behavior, attributes, factor);

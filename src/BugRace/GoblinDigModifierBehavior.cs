@@ -44,16 +44,7 @@ namespace rfmechanics.BugRace
                 if (heldTool == EnumTool.Shovel)
                     return 1f;
 
-                // No class = not a goblin; overrides HasTrait's null-class-returns-true default.
-                string charClass = byPlayer.Entity.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return 1f;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return 1f;
-
-                if (!charSys.HasTrait(byPlayer, cfg.GoblinTraitCode))
+                if (!RaceTraits.HasTrait(byPlayer, cfg.GoblinTraitCode))
                     return 1f;
 
                 return (float)cfg.GoblinBareHandDigRate;

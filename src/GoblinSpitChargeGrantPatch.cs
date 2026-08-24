@@ -43,17 +43,8 @@ namespace rfmechanics
 
                 if (byEntity is not EntityPlayer player) return;
 
-                // Load-bearing: HasTrait returns true for a null class, so skipping this makes every unassigned player match.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass)) return;
-
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null) return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null) return;
-
-                if (!charSys.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
+                if (!RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
 
                 if (cfg.EnableGoblinSpitCharges)
                 {

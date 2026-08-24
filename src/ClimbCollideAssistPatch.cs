@@ -50,20 +50,8 @@ namespace rfmechanics
                 if (player.Controls.Sneak)
                     return;
 
-                // No class = not a dwarf; overrides HasTrait's null-class-returns-true default.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null)
-                    return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return;
-
-                if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
+                if (!RaceTraits.HasTrait(iplayer, cfg.DwarfTraitCode))
                     return;
 
                 if (player.Pos.Motion.Y > 0)

@@ -57,17 +57,7 @@ namespace rfmechanics
                     if (iplayer.Entity == null)
                         return;
 
-                    // Load-bearing: null check prevents HasTrait's null-class-returns-true
-                    // default from charging classless players as dwarves.
-                    string charClass = iplayer.Entity.WatchedAttributes.GetString("characterClass");
-                    if (string.IsNullOrEmpty(charClass))
-                        return;
-
-                    var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                    if (charSys == null)
-                        return;
-
-                    if (!charSys.HasTrait(iplayer, cfg.DwarfTraitCode))
+                    if (!RaceTraits.HasTrait(iplayer, cfg.DwarfTraitCode))
                         return;
 
                     float seconds = __instance.entity.Attributes.GetFloat(KeyClimbSeconds);

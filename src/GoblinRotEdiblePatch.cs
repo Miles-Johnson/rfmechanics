@@ -27,16 +27,8 @@ namespace rfmechanics
 
             if (forEntity is not EntityPlayer player) return;
 
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass)) return;
-
             IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) return;
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null) return;
-
-            if (!charSys.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
+            if (!RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
 
             __result = new FoodNutritionProperties
             {

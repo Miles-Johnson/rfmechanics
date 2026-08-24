@@ -106,17 +106,7 @@ namespace rfmechanics
                 if (path.Contains("-placed-"))
                     return;
 
-                // Class guard: no class = not an elf (overrides HasTrait's
-                // null-class-returns-true default).
-                string charClass = byPlayer.Entity.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return;
-
-                if (!charSys.HasTrait(byPlayer, cfg.ElfTraitCode))
+                if (!RaceTraits.HasTrait(byPlayer, cfg.ElfTraitCode))
                     return;
 
                 // ── Construct the "{family}-placed-{wood}" self-drop ──

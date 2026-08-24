@@ -92,16 +92,8 @@ namespace rfmechanics
             if (candidate is not EntityPlayer player) return false;
             if (candidate.Properties.CanClimb != true) return false;
 
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass)) return false;
-
             IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) return false;
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null) return false;
-
-            if (!charSys.HasTrait(iplayer, cfg.GoblinTraitCode)) return false;
+            if (!RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode)) return false;
 
             entity = candidate;
             return true;
