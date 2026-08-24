@@ -645,16 +645,8 @@ namespace rfmechanics
                     int y = (int)player.Entity.Pos.Y;
                     int seaLevel = api.World.SeaLevel;
 
-                    string charClass = player.Entity.WatchedAttributes.GetString("characterClass");
-                    bool hasClass = charClass != null;
-
-                    bool hasTrait = false;
-                    if (hasClass)
-                    {
-                        var charSys = api.ModLoader.GetModSystem<CharacterSystem>();
-                        if (charSys != null)
-                            hasTrait = charSys.HasTrait(player, config.DwarfTraitCode);
-                    }
+                    bool hasClass = player.Entity.WatchedAttributes.GetString("characterClass") != null;
+                    bool hasTrait = RaceTraits.HasTrait(player, config.DwarfTraitCode);
 
                     double depthFrac = GameMath.Clamp((double)(seaLevel - y) / seaLevel, 0.0, 1.0);
                     double altFrac = GameMath.Clamp((double)(y - seaLevel) / seaLevel, 0.0, 1.0);
@@ -781,8 +773,7 @@ namespace rfmechanics
                         float thew = thewBhv != null ? thewBhv.Thew : entity.Attributes.GetFloat("rf-orc-thew", 0f);
 
                         string charClass = entity.WatchedAttributes.GetString("characterClass");
-                        var charSys = api.ModLoader.GetModSystem<CharacterSystem>();
-                        bool isOrc = !string.IsNullOrEmpty(charClass) && charSys != null && charSys.HasTrait(player, cfg.OrcTraitCode);
+                        bool isOrc = RaceTraits.HasTrait(player, cfg.OrcTraitCode);
 
                         var hunger = entity.GetBehavior<EntityBehaviorHunger>();
                         if (hunger == null || hunger.MaxSaturation <= 0f)
