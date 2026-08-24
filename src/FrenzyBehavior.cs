@@ -1,167 +1,98 @@
 using System;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
+using Vintagestory.API.Datastructures;
+using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
 namespace rfmechanics
 {
     /// <summary>
-    /// Frenzy: as health drops, an orc with Thew remaining gets faster and hits harder, paid
-    /// from the same Thew pool Burn spends from, via curveMult = (1-healthFrac)^
-    /// FrenzyCurveExponent, entered/exited off BurnActivationHealthFracGap (shared with Burn
-    /// intentionally -- both key off "how far below full health", not their own threshold).
-    /// No shared budget with Burn: each independently reads/writes ThewBehavior.Thew and stops
-    /// itself once its own floor is no longer affordable, so with both active they can stop at
-    /// different moments.
+    /// Frenzy: passive, no activation event. Every fast tick, recomputes a ramp from the orc's
+    /// current satFrac (curveMult = (1 - satFrac/FrenzySatietyGate)^FrenzyCurveExponent, zero at
+    /// the gate, full at satFrac 0) and applies walkspeed/jumpHeightMul deltas scaled by it. The
+    /// bonus is free above FrenzyDebtSatietyThreshold; below it, it also incurs FrenzyDebt (see
+    /// ThewBehavior.FrenzyDebt) rather than spending Thew directly. Stops entirely only when Thew
+    /// is 0 and some debt (Burn or Frenzy) is still outstanding -- resumes on its own once
+    /// ThewBehavior's tick-drain or eating brings Thew back above 0.
     /// Deliberately does not special-case Band demotion -- a Bulky orc who frenzies and shrinks
     /// mid-fight is the intended self-sequencing behavior, so no guard against it is added.
-    /// Structurally mirrors BurnBehavior (temporary fast-tick listener, same JSON-attach/IsOrc
-    /// gate) -- see BurnBehavior's header for the rationale.
     /// </summary>
     public class FrenzyBehavior : EntityBehavior
     {
         private const string StatSource = "rf-orc-frenzy";
 
-        private float accum;
         private long fastListenerId = -1;
-        private bool frenzied;
-        private float thewSpentThisFrenzy;
 
-        // Write-cache of the last value actually pushed via Stats.Set, so ties aren't rewritten.
+        // Write-cache of the last values actually pushed via Stats.Set, so ties aren't rewritten.
         private float lastWalkSpeedDelta;
-        private float lastMeleeDamageDelta;
+        private float lastJumpBonusDelta;
 
         public FrenzyBehavior(Entity entity) : base(entity) { }
 
         public override string PropertyName() => "rffrenzy";
 
-        public bool Frenzied => frenzied;
-        public float ThewSpentThisFrenzy => thewSpentThisFrenzy;
-
-        public override void OnGameTick(float deltaTime)
+        public override void Initialize(EntityProperties properties, JsonObject attributes)
         {
-            if (entity.World.Side != EnumAppSide.Server) return;
+            base.Initialize(properties, attributes);
 
             var cfg = RFMechanicsModSystem.Config;
-
-            accum += deltaTime;
-            if (accum < (float)(cfg?.FrenzySlowTickInterval ?? 6.0)) return;
-            accum = 0f;
-
-            Evaluate();
-        }
-
-        public override void OnEntityReceiveDamage(DamageSource damageSource, ref float damage)
-        {
-            base.OnEntityReceiveDamage(damageSource, ref damage);
-            if (entity.World.Side != EnumAppSide.Server) return;
-
-            Evaluate();
-        }
-
-        public override void OnEntityDeath(DamageSource damageSourceForDeath)
-        {
-            StopFrenzy();
+            int ms = cfg?.FrenzyFastTickMs ?? 500;
+            fastListenerId = entity.World.RegisterGameTickListener(FastTick, ms, 0);
         }
 
         public override void OnEntityDespawn(EntityDespawnData despawn)
-        {
-            StopFrenzy();
-        }
-
-        /// <summary>Mirrors BurnBehavior.Evaluate, including reuse of BurnActivationHealthFracGap as the shared entry/exit gate.</summary>
-        private void Evaluate()
-        {
-            var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null || !cfg.EnableFrenzy || !cfg.EnableThew || !entity.Alive || !IsOrc())
-            {
-                if (frenzied) StopFrenzy();
-                return;
-            }
-
-            var healthBhv = entity.GetBehavior<EntityBehaviorHealth>();
-            var thewBhv = entity.GetBehavior<ThewBehavior>();
-            if (healthBhv == null || thewBhv == null || healthBhv.MaxHealth <= 0f)
-            {
-                if (frenzied) StopFrenzy();
-                return;
-            }
-
-            float frac = healthBhv.Health / healthBhv.MaxHealth;
-            bool shouldFrenzy = (1f - frac) > (float)cfg.BurnActivationHealthFracGap && thewBhv.Thew > (float)cfg.FrenzyThewFloor;
-
-            if (shouldFrenzy && !frenzied) StartFrenzy();
-            else if (!shouldFrenzy && frenzied) StopFrenzy();
-        }
-
-        private void StartFrenzy()
-        {
-            var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null) return;
-
-            frenzied = true;
-            thewSpentThisFrenzy = 0f;
-            fastListenerId = entity.World.RegisterGameTickListener(FastTick, cfg.FrenzyFastTickMs, 0);
-        }
-
-        private void StopFrenzy()
         {
             if (fastListenerId >= 0)
             {
                 entity.World.UnregisterGameTickListener(fastListenerId);
                 fastListenerId = -1;
             }
-            frenzied = false;
-
-            // Instant clear, no fade -- bonus drops the instant health recovers above the trigger.
-            ClearStats();
         }
 
-        /// <summary>Bonus and Thew cost are both driven by the same curveMult from the current
-        /// healthFrac, so they escalate together as health drops further within a session.</summary>
         private void FastTick(float deltaTime)
         {
-            if (entity.World.Side != EnumAppSide.Server) { StopFrenzy(); return; }
+            if (entity.World.Side != EnumAppSide.Server) return;
 
             var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null || !cfg.EnableFrenzy || !cfg.EnableThew || !entity.Alive)
+            if (cfg == null || !cfg.EnableFrenzy || !cfg.EnableThew || !entity.Alive || !IsOrc())
             {
-                StopFrenzy();
+                ClearStats();
                 return;
             }
 
-            var healthBhv = entity.GetBehavior<EntityBehaviorHealth>();
+            var hunger = entity.GetBehavior<EntityBehaviorHunger>();
             var thewBhv = entity.GetBehavior<ThewBehavior>();
-            if (healthBhv == null || thewBhv == null || healthBhv.MaxHealth <= 0f)
+            if (hunger == null || hunger.MaxSaturation <= 0f || thewBhv == null)
             {
-                StopFrenzy();
+                ClearStats();
                 return;
             }
 
-            float thewAvailable = thewBhv.Thew - (float)cfg.FrenzyThewFloor;
-            if (thewAvailable <= 0f)
+            if (thewBhv.Thew <= 0f && (thewBhv.BurnDebt + thewBhv.FrenzyDebt) > 0f)
             {
-                StopFrenzy();
+                ClearStats();
                 return;
             }
 
-            float healthFrac = healthBhv.Health / healthBhv.MaxHealth;
-            float curveMult = (float)Math.Pow(Math.Max(0.0, 1.0 - healthFrac), cfg.FrenzyCurveExponent);
-
-            float thewWanted = (float)cfg.FrenzyMaxThewPerSecond * curveMult * deltaTime;
-            float thewToSpend = Math.Min(thewWanted, thewAvailable);
-            if (thewToSpend > 0f)
+            float satFrac = hunger.Saturation / hunger.MaxSaturation;
+            float gate = (float)cfg.FrenzySatietyGate;
+            if (satFrac >= gate)
             {
-                thewBhv.Thew -= thewToSpend;
-                thewSpentThisFrenzy += thewToSpend;
+                ClearStats();
+                return;
+            }
+
+            float t = GameMath.Clamp(1f - satFrac / gate, 0f, 1f);
+            float curveMult = (float)Math.Pow(t, cfg.FrenzyCurveExponent);
+
+            if (satFrac < (float)cfg.FrenzyDebtSatietyThreshold)
+            {
+                float debtIncurred = (float)cfg.FrenzyThewPerSecond * curveMult * deltaTime;
+                if (debtIncurred > 0f) thewBhv.FrenzyDebt += debtIncurred;
             }
 
             ApplyStats(cfg, curveMult);
-
-            if ((1f - healthFrac) <= (float)cfg.BurnActivationHealthFracGap || thewBhv.Thew <= (float)cfg.FrenzyThewFloor)
-            {
-                StopFrenzy();
-            }
         }
 
         /// <summary>Write-threshold-gated: curveMult recomputes every fast tick, so an unconditional Stats.Set every tick would spam WatchedAttributes dirty/sync.</summary>
@@ -169,7 +100,7 @@ namespace rfmechanics
         {
             float threshold = (float)cfg.FrenzyStatWriteThreshold;
             float walkSpeedDelta = (float)cfg.FrenzyMaxSpeedBonus * curveMult;
-            float meleeDamageDelta = (float)cfg.FrenzyMaxDamageBonus * curveMult;
+            float jumpBonusDelta = (float)cfg.FrenzyMaxJumpBonus * curveMult;
 
             if (Math.Abs(walkSpeedDelta - lastWalkSpeedDelta) > threshold)
             {
@@ -177,19 +108,34 @@ namespace rfmechanics
                 lastWalkSpeedDelta = walkSpeedDelta;
             }
 
-            if (Math.Abs(meleeDamageDelta - lastMeleeDamageDelta) > threshold)
+            if (Math.Abs(jumpBonusDelta - lastJumpBonusDelta) > threshold)
             {
-                entity.Stats.Set("meleeWeaponsDamage", StatSource, meleeDamageDelta);
-                lastMeleeDamageDelta = meleeDamageDelta;
+                entity.Stats.Set("jumpHeightMul", StatSource, jumpBonusDelta);
+                lastJumpBonusDelta = jumpBonusDelta;
             }
         }
 
         private void ClearStats()
         {
-            entity.Stats.Remove("walkspeed", StatSource);
-            entity.Stats.Remove("meleeWeaponsDamage", StatSource);
-            lastWalkSpeedDelta = 0f;
-            lastMeleeDamageDelta = 0f;
+            if (lastWalkSpeedDelta != 0f)
+            {
+                entity.Stats.Remove("walkspeed", StatSource);
+                lastWalkSpeedDelta = 0f;
+            }
+            if (lastJumpBonusDelta != 0f)
+            {
+                entity.Stats.Remove("jumpHeightMul", StatSource);
+                lastJumpBonusDelta = 0f;
+            }
+        }
+
+        /// <summary>Public static so /rfthew dump reports the exact ramp value FastTick is using.</summary>
+        public static float ComputeCurveMult(float satFrac, RFMechanicsConfig cfg)
+        {
+            float gate = (float)cfg.FrenzySatietyGate;
+            if (satFrac >= gate) return 0f;
+            float t = GameMath.Clamp(1f - satFrac / gate, 0f, 1f);
+            return (float)Math.Pow(t, cfg.FrenzyCurveExponent);
         }
 
         // charClass null-check is load-bearing: HasTrait treats an unset class as trait-having, not trait-lacking.

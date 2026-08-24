@@ -6,10 +6,11 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Burn-to-Survive: an orc above BurnThewFloor burns Thew to heal via a cubic curve with no
-    /// activation threshold (see FastTick), Thew-gated not band-gated. Deliberately stacks with
-    /// vanilla's saturation-throttled regen and the starvation shield (ThewShieldPatch) -- a
-    /// starving orc near death burns from both simultaneously.
+    /// Burn-to-Survive: an orc above BurnThewFloor heals via a cubic curve with no activation
+    /// threshold (see FastTick), Thew-gated not band-gated. Healing incurs BurnDebt rather than
+    /// spending Thew directly (see ThewBehavior.BurnDebt) -- Thew only gates whether burn can
+    /// run at all. Deliberately stacks with vanilla's saturation-throttled regen -- a starving
+    /// orc near death still burns.
     /// Owns a *temporary* fast tick listener (BurnFastTickMs), registered only while burn
     /// conditions hold rather than running unconditionally every tick like ThewBehavior/
     /// BandBehavior; see BurnActivationHealthFracGap's doc comment for the entry/exit gate.
@@ -26,14 +27,14 @@ namespace rfmechanics
         private float accum;
         private long fastListenerId = -1;
         private bool burning;
-        private float thewSpentThisBurn;
+        private float debtIncurredThisBurn;
 
         public BurnBehavior(Entity entity) : base(entity) { }
 
         public override string PropertyName() => "rfburn";
 
         public bool Burning => burning;
-        public float ThewSpentThisBurn => thewSpentThisBurn;
+        public float DebtIncurredThisBurn => debtIncurredThisBurn;
 
         public override void OnGameTick(float deltaTime)
         {
@@ -99,7 +100,7 @@ namespace rfmechanics
             if (cfg == null) return;
 
             burning = true;
-            thewSpentThisBurn = 0f;
+            debtIncurredThisBurn = 0f;
             fastListenerId = entity.World.RegisterGameTickListener(FastTick, cfg.BurnFastTickMs, 0);
         }
 
@@ -132,41 +133,27 @@ namespace rfmechanics
                 return;
             }
 
-            float thewAvailable = thewBhv.Thew - (float)cfg.BurnThewFloor;
-            if (thewAvailable <= 0f)
+            if (thewBhv.Thew <= (float)cfg.BurnThewFloor)
             {
                 StopBurn();
                 return;
             }
 
             // Recomputed fresh from the CURRENT healthFrac each tick (not cached from StartBurn)
-            // so the rate escalates smoothly as health drops within the same burn session.
+            // so the rate escalates smoothly as health drops within the same burn session. No
+            // longer capped by available Thew -- healing incurs debt (BurnDebt) instead of
+            // spending Thew directly, so there's no per-tick budget to run out of.
             float healthFrac = healthBhv.Health / healthBhv.MaxHealth;
             float curveMult = (float)Math.Pow(Math.Max(0.0, 1.0 - healthFrac), cfg.BurnCurveExponent);
-            float hpWanted = (float)cfg.BurnMaxHealPerSecond * curveMult * deltaTime;
-            float thewPerHp = (float)cfg.BurnThewPerHp;
-            float thewNeeded = hpWanted * thewPerHp;
+            float hpToApply = (float)cfg.BurnMaxHealPerSecond * curveMult * deltaTime;
+            float debtIncurred = hpToApply * (float)cfg.BurnThewPerHp;
 
-            float hpToApply;
-            float thewToSpend;
-            if (thewPerHp <= 0f || thewNeeded <= thewAvailable)
-            {
-                hpToApply = hpWanted;
-                thewToSpend = thewNeeded;
-            }
-            else
-            {
-                // Partial final tick -- only enough Thew above the floor remains.
-                thewToSpend = thewAvailable;
-                hpToApply = thewAvailable / thewPerHp;
-            }
-
-            thewBhv.Thew -= thewToSpend;
-            thewSpentThisBurn += thewToSpend;
+            thewBhv.BurnDebt += debtIncurred;
+            debtIncurredThisBurn += debtIncurred;
             healthBhv.Health = Math.Min(healthBhv.Health + hpToApply, healthBhv.MaxHealth);
 
             float newFrac = healthBhv.Health / healthBhv.MaxHealth;
-            if ((1f - newFrac) <= (float)cfg.BurnActivationHealthFracGap || thewBhv.Thew <= (float)cfg.BurnThewFloor)
+            if ((1f - newFrac) <= (float)cfg.BurnActivationHealthFracGap)
             {
                 StopBurn();
             }

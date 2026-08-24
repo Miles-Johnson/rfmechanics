@@ -7,26 +7,21 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// StarvationShieldWhileThew: while an orc's Thew &gt; 0, suppresses vanilla's own
-    /// starvation damage (EntityBehaviorHunger.SlowTick raises it as DamageSource { Source =
-    /// Internal, Type = Hunger }).
-    /// Patched at EntityBehaviorHealth.OnEntityReceiveDamage instead of SlowTick itself, since
-    /// SlowTick also does unrelated cold-resistance work in the same method body that must not
-    /// be skipped -- a Harmony prefix can only skip a method's entire body, not part of it,
-    /// without a transpiler. Zeroing `damage` here lets the original run harmlessly (Health -= 0)
-    /// rather than skipping whatever else OnEntityReceiveDamage does (death check, events).
+    /// Repays orc Thew debt (Burn/Frenzy) on eat, funded by saturation rather than Thew itself --
+    /// pays BurnDebt first, then FrenzyDebt (see ThewBehavior.PayDebt). Same Harmony hook the
+    /// deleted eat-pulse patch used (EntityBehaviorHunger.OnEntityReceiveSaturation), but this is
+    /// a new class, not a repurposed one -- the two patches share nothing but the hook target.
+    /// Also stamps LastFoodCategoryKey: this is the only remaining hook on the eat event, and
+    /// ThewBehavior's gain-zone food-type gate still reads that key every tick.
     /// </summary>
-    [HarmonyPatch(typeof(EntityBehaviorHealth), nameof(EntityBehaviorHealth.OnEntityReceiveDamage))]
-    public static class ThewShieldPatch
+    [HarmonyPatch(typeof(EntityBehaviorHunger), nameof(EntityBehaviorHunger.OnEntityReceiveSaturation))]
+    public static class ThewDebtRepayPatch
     {
         private static bool loggedException = false;
 
-        [HarmonyPrefix]
-        public static void Prefix(EntityBehaviorHealth __instance, DamageSource damageSource, ref float damage)
+        [HarmonyPostfix]
+        public static void Postfix(EntityBehaviorHunger __instance, float saturation, EnumFoodCategory foodCat = EnumFoodCategory.Unknown)
         {
-            if (damageSource == null || damageSource.Type != EnumDamageType.Hunger)
-                return;
-
             Entity? entity = __instance?.entity;
             if (entity == null) return;
 
@@ -35,7 +30,7 @@ namespace rfmechanics
                 if (entity.World.Side != EnumAppSide.Server) return;
 
                 var cfg = RFMechanicsModSystem.Config;
-                if (cfg == null || !cfg.EnableThew || !cfg.StarvationShieldWhileThew) return;
+                if (cfg == null || !cfg.EnableThew) return;
 
                 if (entity is not EntityPlayer player) return;
 
@@ -49,10 +44,15 @@ namespace rfmechanics
                 var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
                 if (charSys == null || !charSys.HasTrait(iplayer, cfg.OrcTraitCode)) return;
 
-                var thewBhv = entity.GetBehavior<ThewBehavior>();
-                if (thewBhv == null || thewBhv.Thew <= 0f) return; // Thew == 0: shield off, vanilla resumes untouched
+                // Recorded unconditionally -- ThewBehavior's gain-zone gate reads this regardless of whether this bite repays any debt.
+                entity.Attributes.SetInt(ThewBehavior.LastFoodCategoryKey, (int)foodCat);
 
-                damage = 0f;
+                if (saturation <= 0f) return;
+
+                var thewBhv = entity.GetBehavior<ThewBehavior>();
+                if (thewBhv == null) return;
+
+                thewBhv.PayDebt(saturation * (float)cfg.DebtRepaidPerSaturationPoint);
             }
             catch (Exception ex)
             {
@@ -60,7 +60,7 @@ namespace rfmechanics
                 {
                     loggedException = true;
                     RFMechanicsModSystem.Api?.Logger?.Error(
-                        "[rfmechanics] Exception in ThewShieldPatch: {0}", ex);
+                        "[rfmechanics] Exception in ThewDebtRepayPatch: {0}", ex);
                 }
             }
         }

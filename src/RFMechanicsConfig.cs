@@ -185,13 +185,9 @@ public class RFMechanicsConfig
     /// Multiply: the original behavior (2.5x * 3x = 7.5x), preserved as an option.</summary>
     public OrcStomachStackingMode StomachStackingMode { get; set; } = OrcStomachStackingMode.Max;
 
-    /// <summary>Master toggle for the Thew death penalty. Default ON per the settled design
-    /// ("the body burned everything to heal").</summary>
-    public bool EnableThewDeathPenalty { get; set; } = true;
-
-    /// <summary>Flat Thew loss applied on death for orc players, when EnableThewDeathPenalty is
-    /// on. 0.35 ~= one band's worth of Thew; clamped to 0 by Thew's own setter.</summary>
-    public double ThewDeathPenalty { get; set; } = 0.35;
+    /// <summary>Ceiling Thew is reset down to on death, never up -- a Thew &gt; this value drops to
+    /// it; Thew already at or below it is left alone.</summary>
+    public double ThewDeathResetCap { get; set; } = 0.4;
 
     /// <summary>Food-type gate on Thew gain: whenever the last item eaten resolved to
     /// Fruit/Vegetable/Grain, BOTH the hourly tick gain and the eat-pulse are blocked regardless
@@ -199,59 +195,38 @@ public class RFMechanicsConfig
     /// can't be "ridden" by topping off satiety on cheap grain/veg/fruit afterward.</summary>
     public bool EnableThewFoodTypeGate { get; set; } = true;
 
-    /// <summary>Decay rate when Thew's gain condition doesn't fire but satFrac is at/above
-    /// ThewRampFloor (well-fed but not building Thew). Gentler than ThewDecayUnderfedPerHour
-    /// since this orc isn't starving, just eating the wrong things -- but deliberately nonzero so a bread-only diet still erodes Bulky/Standard over hours. TUNING: not locked.</summary>
-    public double ThewDecaySatedNonProteinPerHour { get; set; } = 0.03;
-
-    /// <summary>Base Thew gain per real-world elapsed hour at full ramp (sat &gt;= ThewRampCeiling)
-    /// + protein-gated, before the per-band ThewGainBandMult multiplier and ramp scaling. Locked design value.</summary>
-    public double ThewGainPerHour { get; set; } = 0.10;
+    /// <summary>Three satiety zones, no ramp: gain above ThewGainSatietyGate, drift between it
+    /// and ThewDecayLowSatietyThreshold, decay below that, all per in-game hour (ThewBehavior
+    /// samples world.Calendar.ElapsedHours deltas, not real time, so this rate is invariant to
+    /// the server's day length). Applied before the per-band ThewGainBandMult multiplier.</summary>
+    public double ThewGainPerHour { get; set; } = 0.0025;
 
     /// <summary>Per-band multiplier on ThewGainPerHour -- Lean gains fastest (provisioning is
     /// easy to keep up), Bulky slowest (war-form resists being built further while already
     /// deep). Locked: Lean 1.2 / Standard 1.0 / Bulky 0.8.</summary>
     public OrcBandTriple ThewGainBandMult { get; set; } = new OrcBandTriple { Lean = 1.2, Standard = 1.0, Bulky = 0.8 };
 
-    /// <summary>Flat Thew decay per real-world elapsed hour applied continuously while the
-    /// player's current band is Bulky, regardless of saturation/gorge/decay-tier state --
-    /// stacks additively with whichever decay tier is currently active. This is the lever that
-    /// makes Bulky a war posture rather than a lifestyle: at the coded defaults, a
-    /// well-provisioned non-fighting orc can just barely sustain Bulky.</summary>
-    public double BulkyHoldDecayPerHour { get; set; } = 0.025;
+    /// <summary>satFrac boundary above which the gain zone applies (below it, drift or decay
+    /// applies instead -- see ThewDecayLowSatietyThreshold).</summary>
+    public double ThewGainSatietyGate { get; set; } = 0.75;
 
-    /// <summary>Three-tier decay below ThewRampFloor: Underfed (ThewHungryThreshold..
-    /// ThewRampFloor), Hungry (0..ThewHungryThreshold), Starving (Saturation == 0 exactly,
-    /// matching vanilla's own starvation-damage trigger). No neutral parking zone exists below
-    /// the ramp floor -- above it you build, below it you erode, always at some rate.</summary>
-    public double ThewDecayUnderfedPerHour { get; set; } = 0.05;
+    /// <summary>Per-in-game-hour Thew loss while satFrac sits in the drift zone (between
+    /// ThewDecayLowSatietyThreshold and ThewGainSatietyGate) -- well-fed but not gaining.</summary>
+    public double ThewDriftPerHour { get; set; } = 0.0025;
 
-    /// <summary>See ThewDecayUnderfedPerHour's doc comment -- the middle tier, satFrac between 0
-    /// (exclusive) and ThewHungryThreshold.</summary>
-    public double ThewDecayHungryPerHour { get; set; } = 0.15;
+    /// <summary>satFrac boundary below which the steeper low-satiety decay applies instead of drift.</summary>
+    public double ThewDecayLowSatietyThreshold { get; set; } = 0.20;
 
-    /// <summary>See ThewDecayUnderfedPerHour's doc comment -- the steepest tier, only at
-    /// Saturation == 0 exactly (vanilla's own starvation-damage zone).</summary>
-    public double ThewDecayStarvingPerHour { get; set; } = 0.60;
+    /// <summary>Per-in-game-hour Thew loss while satFrac is below ThewDecayLowSatietyThreshold
+    /// but Saturation hasn't hit exactly 0 (see ThewDecayStarvingPerHour for that case).</summary>
+    public double ThewDecayLowSatietyPerHour { get; set; } = 0.05;
 
-    /// <summary>Saturation fraction boundary between the Underfed and Hungry decay tiers.</summary>
-    public double ThewHungryThreshold { get; set; } = 0.25;
+    /// <summary>Per-in-game-hour Thew loss while Saturation == 0 exactly, matching vanilla's own
+    /// starvation-damage trigger. Steepest tier -- overrides ThewDecayLowSatietyPerHour.</summary>
+    public double ThewDecayStarvingPerHour { get; set; } = 0.20;
 
-    /// <summary>While true: an orc with Thew &gt; 0 is immune to vanilla's own starvation damage,
-    /// suppressed via a Harmony prefix on EntityBehaviorHealth.OnEntityReceiveDamage. At Thew ==
-    /// 0 the shield drops and vanilla starvation damage/death applies untouched. See ThewShieldPatch.cs.</summary>
-    public bool StarvationShieldWhileThew { get; set; } = true;
-
-    /// <summary>Saturation fraction below which the graded gain ramp is zero; gain scales
-    /// linearly from 0 here to full rate at ThewRampCeiling. Also doubles as the upper boundary of the Underfed decay tier.</summary>
-    public double ThewRampFloor { get; set; } = 0.50;
-
-    /// <summary>Saturation fraction at which the graded gain ramp reaches its full (1.0)
-    /// multiplier. Linear between ThewRampFloor and this value.</summary>
-    public double ThewRampCeiling { get; set; } = 1.00;
-
-    /// <summary>DORMANT: superseded by ThewGainPerSaturationPoint -- a flat grant per bite made
-    /// nibbling the dominant, farmable Thew income path. No longer read anywhere; left in place so existing rfmechanics.json installs don't drop the key.</summary>
+    /// <summary>DORMANT: the eat-pulse mechanic this fed (a flat grant per bite) was removed. No
+    /// longer read anywhere; left in place so existing rfmechanics.json installs don't drop the key.</summary>
     public double ThewPerBite { get; set; } = 0.001;
 
     /// <summary>DORMANT: superseded -- proportional-to-saturation grants no longer need a
@@ -259,27 +234,25 @@ public class RFMechanicsConfig
     /// meals (which fire OnEntityReceiveSaturation once per ingredient). No longer read anywhere; left in place for install compatibility.</summary>
     public double BiteCooldownSec { get; set; } = 60.0;
 
-    /// <summary>Thew granted per point of raw saturation on a qualifying eat event, replacing
-    /// ThewPerBite's flat-per-event grant -- rewards eating well (one real meal) over nibbling,
-    /// since total reward tracks total saturation eaten rather than event count. Applied to the
-    /// pre-nutritionGainMultiplier raw `saturation` parameter, unlike the *Level fields. TUNING:
-    /// deliberately small so the eat-pulse stays a bounded top-up, not a rival to the tick gain.</summary>
-    public double ThewGainPerSaturationPoint { get; set; } = 0.0000133;
-
-    /// <summary>Ceiling on a single eat event's ThewGainPerSaturationPoint grant, so one unusually high-saturation item can't produce an outsized single jump.</summary>
-    public double ThewPerBiteCap { get; set; } = 0.005;
-
     /// <summary>Threshold above which the protein gain condition is met -- checked against BOTH
     /// ProteinLevel and DairyLevel (see ThewBehavior.IsProteinGated). Tuned against ProteinLevel:
     /// one fresh cooked meat delivers +112 protein from near-zero, so 150 requires sustained
     /// meat-eating, not one snack. Whether 150 is well-calibrated for DairyLevel too is untested.</summary>
     public double ProteinGateLevel { get; set; } = 150.0;
 
-    /// <summary>Master toggle for the seasonal Thew gain multiplier. Off by default per settled design.</summary>
-    public bool SeasonalGainEnabled { get; set; } = false;
+    /// <summary>Master toggle for the seasonal Thew gain multiplier. On by default (2026-08-23) --
+    /// settled design is orcs bulk before winter and lean out through it.</summary>
+    public bool SeasonalGainEnabled { get; set; } = true;
 
     /// <summary>Per-season Thew gain multipliers, applied only when SeasonalGainEnabled is true.</summary>
     public ThewSeasonalMultipliers SeasonalGainMultipliers { get; set; } = new ThewSeasonalMultipliers();
+
+    /// <summary>One-time starting Thew value applied the first time an entity is ever detected as
+    /// orc (character creation, or the first-ever race-swap into orc) -- distinguishes "never
+    /// initialized" from "genuinely decayed to zero" via ThewBehavior's InitializedKey sentinel.
+    /// 0.4 sits a player just above LeanToStandard (0.35) so a new orc starts Standard, not
+    /// several hours of Lean.</summary>
+    public double ThewCreationFloor { get; set; } = 0.4;
 
     /// <summary>Full item codes that count as "preserved protein" for orc, filling ProteinLevel
     /// at PreservedProteinMultiplier instead of the full rate. Default (cured redmeat/bushmeat)
@@ -289,6 +262,47 @@ public class RFMechanicsConfig
     /// <summary>Multiplier applied to ProteinLevel gain (via nutritionGainMultiplier) for
     /// preserved-protein items. 0.5 = half the protein fill rate of an equivalent fresh item.</summary>
     public double PreservedProteinMultiplier { get; set; } = 0.5;
+
+    // ── Thew Debt (Orc) ──
+
+    /// <summary>Per-in-game-hour Thew moved from ThewBehavior's own tick into paying down
+    /// outstanding Burn/Frenzy debt (see BurnDebt/FrenzyDebt), applied to the sum of both
+    /// counters. Stalls at Thew == 0 -- see ThewBehavior.OnGameTick's debt-drain step.</summary>
+    public double DebtDrainPerHour { get; set; } = 0.04;
+
+    /// <summary>Debt repaid per point of raw saturation on any eat event, regardless of protein
+    /// gate or food type -- eating pays debt before anything else. Burn debt is paid first, then
+    /// frenzy debt (see ThewDebtRepayPatch).</summary>
+    public double DebtRepaidPerSaturationPoint { get; set; } = 0.0000533;
+
+    // ── Puff Cue (Orc) ──
+
+    /// <summary>Master toggle for the client-side orc state particle cue.</summary>
+    public bool EnablePuff { get; set; } = true;
+
+    /// <summary>Total debt (BurnDebt + FrenzyDebt) above which the state byte reads "heavy debt"
+    /// (3) instead of "light debt" (2).</summary>
+    public double HeavyDebtThreshold { get; set; } = 0.15;
+
+    /// <summary>Real seconds between puff bursts while state == 1 (gaining: satFrac above
+    /// ThewGainSatietyGate, no debt). Local-player-only render.</summary>
+    public double PuffIntervalGaining { get; set; } = 6.0;
+
+    /// <summary>Real seconds between puff bursts while state == 2 (light debt: total debt above 0,
+    /// at or below HeavyDebtThreshold). Renders for every nearby player.</summary>
+    public double PuffIntervalLightDebt { get; set; } = 3.0;
+
+    /// <summary>Real seconds between puff bursts while state == 3 (heavy debt: total debt above
+    /// HeavyDebtThreshold). Renders for every nearby player.</summary>
+    public double PuffIntervalHeavyDebt { get; set; } = 1.5;
+
+    /// <summary>Max distance, in blocks, from the viewing client's own player at which a puff
+    /// burst still renders -- beyond this, skipped entirely rather than just faded.</summary>
+    public double PuffRenderRange { get; set; } = 24.0;
+
+    /// <summary>Particle count per burst, fixed regardless of state -- only the interval between
+    /// bursts scales with state, never the burst size. TUNING: not locked.</summary>
+    public double PuffParticleCount { get; set; } = 10.0;
 
     // ── Bands (Orc, Phase 3) ──
 
@@ -316,9 +330,12 @@ public class RFMechanicsConfig
     /// inside it. MinCollisionBox/MaxCollisionBox on ork-char.json (0.86-1.35) never clamp these.</summary>
     public OrcBandTriple BandSizes { get; set; } = new OrcBandTriple { Lean = 0.90, Standard = 1.12, Bulky = 1.28 };
 
-    /// <summary>Real-world seconds to lerp entitySize from the old band's size to the new band's
-    /// on a band cross.</summary>
-    public double BandSizeLerpSeconds { get; set; } = 10.0;
+    /// <summary>Max entitySize change per real second, either direction. entitySize now tracks
+    /// Thew continuously (see BandBehavior.ComputeTargetSize), not band membership, so this rate
+    /// cap is what makes growth/shrink read as a slow drift rather than an instant snap -- e.g.
+    /// the full Lean-to-Standard anchor gap (0.90 to 1.12, 0.22) takes 0.22/0.0007 =~ 314s (5.2
+    /// real minutes) to fully close.</summary>
+    public double SizeChangeRatePerSecond { get; set; } = 0.0007;
 
     /// <summary>Per-band hungerrate multiplier, applied as a Stats.Set delta (target - 1) under
     /// source "rf-orc-band" on the vanilla "hungerrate" category. Lean unmodified (1.0),
@@ -362,6 +379,15 @@ public class RFMechanicsConfig
     /// 1.0 has zero effect -- a reduction is not achievable through this stat without a Harmony patch on PModuleOnGround.DoApply. Not implemented speculatively.</summary>
     public double BulkyJumpHeightReduction_UNWIRED { get; set; } = 0.20;
 
+    /// <summary>Per-band delta on "jumpHeightMul" (delta units, same convention as
+    /// WalkSpeedDelta -- base stat entry is already 1.0, so blended == 1 + delta). Unlike the
+    /// Bulky reduction above, an increase passes straight through PModuleOnGround's
+    /// MathF.Max(1f, blended) floor with no patch needed -- jump height itself is proportional
+    /// to blended (velocity is scaled by sqrt(blended), height by velocity^2). Lean 3x base
+    /// (delta +2.0), Standard 2x base (delta +1.0), Bulky left at 0 (unchanged, matching the
+    /// reduction above staying unimplemented).</summary>
+    public OrcBandTriple JumpHeightMulDelta { get; set; } = new OrcBandTriple { Lean = 2.0, Standard = 1.0, Bulky = 0.0 };
+
     /// <summary>NOT WIRED -- reserved config surface only. "KnockbackResistance" lives on the
     /// shared per-entity-TYPE EntityProperties object, not a per-player Stats category; setting
     /// it directly would mutate shared state across every player entity of that type, not just
@@ -398,9 +424,10 @@ public class RFMechanicsConfig
     /// <summary>Locked design value: exponent on the cubic burn curve. Also the default for FrenzyCurveExponent (same shape family), though independently configurable.</summary>
     public double BurnCurveExponent { get; set; } = 3.0;
 
-    /// <summary>Locked design value: Thew cost per HP healed while burning. A full vanilla
-    /// 15-hp bar costs BurnThewPerHp * 15 =~ 0.45 Thew.</summary>
-    public double BurnThewPerHp { get; set; } = 0.03;
+    /// <summary>Thew debt incurred per HP healed while burning (added to BurnDebt, not
+    /// subtracted from Thew directly -- see DebtDrainPerHour). A full vanilla 15-hp bar adds
+    /// BurnThewPerHp * 15 =~ 0.075 Thew of debt.</summary>
+    public double BurnThewPerHp { get; set; } = 0.005;
 
     /// <summary>Thew floor burn cannot cross. Below this remaining Thew, burn will not
     /// trigger/continue; vanilla death rules apply untouched from that point.</summary>
@@ -418,52 +445,74 @@ public class RFMechanicsConfig
     /// deliberately much faster than the 6s Thew/Band cadence, but only runs while burning.</summary>
     public int BurnFastTickMs { get; set; } = 500;
 
-    // ── Frenzy (Orc, Phase 2 T4) ──
+    // ── Frenzy (Orc) ──
 
-    /// <summary>Master toggle for Frenzy. Independent of EnableBurn -- both key off the same
-    /// health-fraction trigger and spend from the same Thew pool (see FrenzyCurveExponent's doc
-    /// comment for the composition rationale) but are separately disableable.</summary>
+    /// <summary>Master toggle for Frenzy.</summary>
     public bool EnableFrenzy { get; set; } = true;
 
-    /// <summary>Tick cadence, in seconds, for FrenzyBehavior's slow evaluation (entry/exit
-    /// check). Matches Thew/Band/Burn's cadence by convention, independently tunable.</summary>
-    public double FrenzySlowTickInterval { get; set; } = 6.0;
+    /// <summary>satFrac at/above which Frenzy's ramp is zero -- passive, no activation event, just
+    /// recomputed from current satFrac every fast tick.</summary>
+    public double FrenzySatietyGate { get; set; } = 0.50;
 
-    /// <summary>Exponent on the Frenzy curve -- same shape family as Burn, same threshold-free
-    /// trigger (gated for performance only, not a game-design cutoff): speed/damage bonus and
-    /// Thew cost per second all scale as (1-healthFrac)^FrenzyCurveExponent.</summary>
+    /// <summary>Exponent on the Frenzy ramp: curveMult = (1 - satFrac/FrenzySatietyGate)^this,
+    /// zero at FrenzySatietyGate, full at satFrac 0. Same shape family as Burn's curve.</summary>
     public double FrenzyCurveExponent { get; set; } = 3.0;
 
     /// <summary>Walkspeed delta (Stats.Set-delta units, matching WalkSpeedDelta's convention) at
-    /// the curve's peak (healthFrac -&gt; 0), scaled by (1-healthFrac)^FrenzyCurveExponent at every
-    /// point below. TUNING: new mechanic, no locked number -- chosen, flagged for review.</summary>
+    /// the curve's peak (satFrac -&gt; 0), scaled by curveMult at every point below the gate.</summary>
     public double FrenzyMaxSpeedBonus { get; set; } = 0.25;
 
-    /// <summary>Melee damage delta (Stats.Set-delta units, matching BulkyMeleeDamageBonus's
-    /// convention) at the curve's peak, same scaling as FrenzyMaxSpeedBonus. TUNING: new
-    /// mechanic, no locked number -- chosen, flagged for review.</summary>
-    public double FrenzyMaxDamageBonus { get; set; } = 0.35;
+    /// <summary>jumpHeightMul delta (Stats.Set-delta units, matching JumpHeightMulDelta's
+    /// convention -- base stat entry is already 1.0, so blended == 1 + sum of every source's
+    /// delta) at the curve's peak, same scaling as FrenzyMaxSpeedBonus.</summary>
+    public double FrenzyMaxJumpBonus { get; set; } = 1.0;
 
-    /// <summary>Thew spend rate (per second) at the curve's peak. Combined with Burn's own
-    /// worst-case spend, a prolonged fight at critical health can burn through Thew fast --
-    /// intentional: "the correct response to a bloodied orc is to leave." TUNING: not locked.</summary>
-    public double FrenzyMaxThewPerSecond { get; set; } = 0.03;
+    /// <summary>satFrac below which Frenzy's bonus starts incurring FrenzyDebt. Above this
+    /// threshold (but still under FrenzySatietyGate) the bonus is free.</summary>
+    public double FrenzyDebtSatietyThreshold { get; set; } = 0.25;
 
-    /// <summary>Thew floor Frenzy cannot cross, mirroring BurnThewFloor by default but
-    /// independently configurable (Burn and Frenzy read/write the same Thew pool with no
-    /// reservation between them, same no-coordination precedent as any two Thew spenders -- see
-    /// thew-audit.md Q7 -- so each needs its own floor check).</summary>
-    public double FrenzyThewFloor { get; set; } = 0.02;
+    /// <summary>Thew debt incurred per second at the curve's peak, only while satFrac is below
+    /// FrenzyDebtSatietyThreshold (added to FrenzyDebt, not subtracted from Thew directly -- see
+    /// DebtDrainPerHour). TUNING: not locked.</summary>
+    public double FrenzyThewPerSecond { get; set; } = 0.005;
 
-    /// <summary>Interval, in milliseconds, of Frenzy's own fast game-tick listener. Mirrors
-    /// BurnFastTickMs by default, independently tunable.</summary>
+    /// <summary>Interval, in milliseconds, of Frenzy's fast game-tick listener, registered
+    /// unconditionally in Initialize (Frenzy is passive, no start/stop). Mirrors BurnFastTickMs
+    /// by default, independently tunable.</summary>
     public int FrenzyFastTickMs { get; set; } = 500;
 
-    /// <summary>Minimum change in Frenzy's computed walkspeed/meleeWeaponsDamage stat values
-    /// before they're re-written via Stats.Set -- Frenzy recomputes every fast tick (the bonus
-    /// tracks current healthFrac continuously, not a value fixed at trigger time), so without a
-    /// write-avoidance threshold this would spam WatchedAttributes dirty/sync on every tick.</summary>
+    /// <summary>Minimum change in Frenzy's computed walkspeed/jumpHeightMul stat values before
+    /// they're re-written via Stats.Set -- Frenzy recomputes every fast tick (the bonus tracks
+    /// current satFrac continuously), so without a write-avoidance threshold this would spam
+    /// WatchedAttributes dirty/sync on every tick.</summary>
     public double FrenzyStatWriteThreshold { get; set; } = 0.02;
+
+    // ── Orc Wild-Animal Resist (standalone, no Thew/Frenzy dependency) ──
+
+    /// <summary>Master toggle for orc damage resistance against wild-animal attackers.
+    /// Deliberately independent of EnableFrenzy/EnableThew -- this exists specifically for an
+    /// orc with no Thew budget, so it must not require either to be on.</summary>
+    public bool EnableOrcWildAnimalResist { get; set; } = true;
+
+    /// <summary>Health must drop below this fraction remaining (i.e. (1-healthFrac) must
+    /// exceed this gap) before any resist applies. The curve is continuous at this
+    /// threshold (resist is exactly 0 here, not a step) -- see OrcWildAnimalResistPatch.
+    /// TUNING: not locked.</summary>
+    public double OrcWildResistActivationHealthFracGap { get; set; } = 0.5;
+
+    /// <summary>Multiplicative damage-taken reduction against wild-animal attackers at the
+    /// curve's peak (health -&gt; 0). TUNING: new mechanic, no locked number -- chosen,
+    /// flagged for review.</summary>
+    public double OrcWildResistMaxBonus { get; set; } = 0.35;
+
+    /// <summary>Exponent on the resist curve, applied to the normalized post-gate health
+    /// fraction. Matches FrenzyCurveExponent's default, independently tunable.</summary>
+    public double OrcWildResistCurveExponent { get; set; } = 3.0;
+
+    /// <summary>If true, wearing any of the 3 vanilla armor slots (head/body/legs) disables
+    /// the resist entirely -- binary by slot, not scaled by protection value, so the player
+    /// only has to learn "armor turns this off."</summary>
+    public bool OrcWildResistRequiresNoArmor { get; set; } = true;
 
     // ── Darkvision (Goblin) ──
 
@@ -1078,6 +1127,6 @@ public class ThewSeasonalMultipliers
 {
     public double Spring { get; set; } = 1.0;
     public double Summer { get; set; } = 1.0;
-    public double Fall { get; set; } = 1.0;
-    public double Winter { get; set; } = 1.0;
+    public double Fall { get; set; } = 1.4;
+    public double Winter { get; set; } = 0.6;
 }

@@ -7,10 +7,13 @@ using Vintagestory.GameContent;
 namespace rfmechanics
 {
     /// <summary>
-    /// Orc Band state machine (Lean/Standard/Bulky) driven by ThewBehavior's Thew via hysteresis.
+    /// Orc Band state machine (Lean/Standard/Bulky) driven by ThewBehavior's Thew via hysteresis,
+    /// for stats only. entitySize is a separate, continuous function of Thew (see
+    /// ComputeTargetSize) rate-capped by SizeChangeRatePerSecond -- it no longer snaps or lerps
+    /// on a band cross, and BandSizes now serves only as the anchor points for that map.
     /// Kept as its own behavior rather than folded into ThewBehavior: Thew is hidden resource
-    /// math, Bands are a visible state machine owning entitySize/stats; ThewBehavior reads
-    /// CurrentBand back for its own gain multiplier (see ThewBehavior.OnGameTick).
+    /// math, Bands are a visible state machine owning stats; ThewBehavior reads CurrentBand back
+    /// for its own gain multiplier (see ThewBehavior.OnGameTick).
     /// </summary>
     public class BandBehavior : EntityBehavior
     {
@@ -21,10 +24,12 @@ namespace rfmechanics
         private const string StatSource = "rf-orc-band";
 
         private float accum;
-        private bool midLerp;
-        private float lerpElapsed;
-        private float lerpFromSize;
-        private float lerpToSize;
+
+        /// <summary>The entitySize value StepSizeTowardTarget itself last wrote (NaN if not yet
+        /// active this load) -- SelfHealEntitySize compares the live attribute against this, not
+        /// against the final Thew target, since during an ordinary glide the two legitimately
+        /// differ for minutes at a time.</summary>
+        private float lastKnownSize = float.NaN;
 
         public BandBehavior(Entity entity) : base(entity) { }
 
@@ -46,8 +51,6 @@ namespace rfmechanics
             private set => entity.Attributes.SetInt(BandAttributeKey, (int)value);
         }
 
-        public bool MidLerp => midLerp;
-
         public override void OnGameTick(float deltaTime)
         {
             if (entity.World.Side != EnumAppSide.Server) return;
@@ -55,16 +58,16 @@ namespace rfmechanics
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null || !cfg.EnableBands) return;
 
-            // Steps the entitySize lerp via OnGameTick + midLerp flag rather than a separate
-            // temporary listener, matching this codebase's convention of reusing OnGameTick over
-            // RegisterGameTickListener lifecycle management (e.g. ThewBehavior's race-gate).
-            if (midLerp) StepLerp(deltaTime);
+            bool isOrc = IsOrc();
+
+            // Size tracks Thew continuously every tick, independent of the slower band-hysteresis
+            // cadence below -- it has nothing to do with band crossings anymore.
+            if (isOrc) StepSizeTowardTarget(cfg, deltaTime);
 
             accum += deltaTime;
             if (accum < (float)cfg.BandTickInterval) return;
             accum = 0f;
 
-            bool isOrc = IsOrc();
             bool active = entity.Attributes.GetBool(ActiveKey);
 
             if (isOrc && !active)
@@ -78,7 +81,6 @@ namespace rfmechanics
                 CurrentBand = initial;
                 entity.Attributes.SetBool(ActiveKey, true);
                 ApplyBandStats(initial, cfg);
-                StartLerp(cfg, initial);
                 return;
             }
 
@@ -89,7 +91,9 @@ namespace rfmechanics
                     ClearBandStats();
                     entity.Attributes.SetBool(ActiveKey, false);
                     // entitySize is left alone here: PlayerModelLib already resets it to 1.0 on
-                    // this same race swap, and reasserting it would fight that reset.
+                    // this same race swap, and reasserting it would fight that reset. Drop our own
+                    // tracking so a later swap back doesn't self-heal against a stale expectation.
+                    lastKnownSize = float.NaN;
                 }
                 return;
             }
@@ -102,16 +106,14 @@ namespace rfmechanics
             {
                 CurrentBand = target;
                 ApplyBandStats(target, cfg);
-                StartLerp(cfg, target);
             }
 
-            if (!midLerp)
-            {
-                SelfHealEntitySize(cfg);
-            }
+            SelfHealEntitySize(cfg);
         }
 
-        /// <summary>Testing hook for /rfthew setband -- forces a band directly, bypassing hysteresis.</summary>
+        /// <summary>Testing hook for /rfthew setband -- forces a band directly, bypassing
+        /// hysteresis. Does not touch entitySize: size tracks Thew, not band, so forcing a band
+        /// has no direct size effect (see ComputeTargetSize).</summary>
         public void ForceBand(Band band)
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -120,7 +122,6 @@ namespace rfmechanics
             CurrentBand = band;
             entity.Attributes.SetBool(ActiveKey, true);
             ApplyBandStats(band, cfg);
-            StartLerp(cfg, band);
         }
 
         private static Band ClassifyFresh(float thew, RFMechanicsConfig cfg)
@@ -172,6 +173,7 @@ namespace rfmechanics
             entity.Stats.Set("armorWalkSpeedAffectedness", StatSource, b == Band.Bulky ? (float)cfg.BulkyArmorWalkSpeedAffectednessDelta : 0f);
             entity.Stats.Set("maxhealthExtraPoints", StatSource, (float)Pick(cfg.MaxHpExtraPoints, b));
             entity.Stats.Set("rangedWeaponsAcc", StatSource, (float)Pick(cfg.RangedAccDelta, b));
+            entity.Stats.Set("jumpHeightMul", StatSource, (float)Pick(cfg.JumpHeightMulDelta, b));
 
             // Stats.Set alone doesn't retrigger EntityBehaviorHealth.UpdateMaxHealth(); must call
             // it explicitly for the HP change to take effect immediately.
@@ -187,43 +189,73 @@ namespace rfmechanics
             entity.Stats.Remove("armorWalkSpeedAffectedness", StatSource);
             entity.Stats.Remove("maxhealthExtraPoints", StatSource);
             entity.Stats.Remove("rangedWeaponsAcc", StatSource);
+            entity.Stats.Remove("jumpHeightMul", StatSource);
 
             entity.GetBehavior<EntityBehaviorHealth>()?.UpdateMaxHealth();
         }
 
-        private void StartLerp(RFMechanicsConfig cfg, Band target)
+        /// <summary>Piecewise-linear map from Thew to entitySize, anchored at BandUpThresholds'
+        /// own Lean/Standard boundary values (0.35/0.70) and BandSizes' three values, plus a fixed
+        /// Thew==1.0 anchor (Thew's own ceiling, not separately configurable). Below the
+        /// Lean-Standard anchor the same segment's slope keeps extending down toward Thew 0 --
+        /// no separate low-end anchor exists.</summary>
+        public static float ComputeTargetSize(float thew, RFMechanicsConfig cfg)
         {
-            lerpFromSize = entity.WatchedAttributes.GetFloat("entitySize", 1f);
-            lerpToSize = (float)Pick(cfg.BandSizes, target);
-            lerpElapsed = 0f;
-            midLerp = true;
+            float leanThew = (float)cfg.BandUpThresholds.LeanToStandard;
+            float standardThew = (float)cfg.BandUpThresholds.StandardToBulky;
+            const float bulkyThew = 1f;
+
+            float leanSize = (float)cfg.BandSizes.Lean;
+            float standardSize = (float)cfg.BandSizes.Standard;
+            float bulkySize = (float)cfg.BandSizes.Bulky;
+
+            if (thew >= standardThew)
+            {
+                float t = (thew - standardThew) / (bulkyThew - standardThew);
+                return standardSize + (bulkySize - standardSize) * t;
+            }
+
+            float t2 = (thew - leanThew) / (standardThew - leanThew);
+            return leanSize + (standardSize - leanSize) * t2;
         }
 
-        private void StepLerp(float deltaTime)
+        /// <summary>Moves entitySize toward its Thew-derived target by at most
+        /// SizeChangeRatePerSecond * deltaTime -- the rate cap that replaced the old band-cross lerp.</summary>
+        private void StepSizeTowardTarget(RFMechanicsConfig cfg, float deltaTime)
         {
-            var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null) { midLerp = false; return; }
+            float thew = entity.GetBehavior<ThewBehavior>()?.Thew ?? 0f;
+            float target = ComputeTargetSize(thew, cfg);
+            float current = entity.WatchedAttributes.GetFloat("entitySize", 1f);
 
-            lerpElapsed += deltaTime;
-            float duration = Math.Max(0.01f, (float)cfg.BandSizeLerpSeconds);
-            float t = Math.Min(1f, lerpElapsed / duration);
-            float size = lerpFromSize + (lerpToSize - lerpFromSize) * t;
+            float maxDelta = (float)cfg.SizeChangeRatePerSecond * deltaTime;
+            float diff = target - current;
+            float next = Math.Abs(diff) <= maxDelta ? target : current + Math.Sign(diff) * maxDelta;
 
-            entity.WatchedAttributes.SetFloat("entitySize", size);
-            RFMechanicsModSystem.TryUpdatePmlEntityProperties(entity, out _);
-
-            if (t >= 1f) midLerp = false;
+            if (next != current)
+            {
+                entity.WatchedAttributes.SetFloat("entitySize", next);
+                RFMechanicsModSystem.TryUpdatePmlEntityProperties(entity, out _);
+            }
+            lastKnownSize = next;
         }
 
-        /// <summary>Snaps entitySize back to the current band's target (no lerp) if it drifts --
-        /// e.g. a live race swap or the character-creation UI resetting/overwriting it.</summary>
+        /// <summary>Snaps entitySize instantly to its current Thew-derived target if it drifts
+        /// from what StepSizeTowardTarget itself last wrote -- e.g. a live race swap or the
+        /// character-creation UI resetting/overwriting it. Comparing against lastKnownSize (not
+        /// the target directly) is load-bearing: during an ordinary Thew-driven glide, actual size
+        /// legitimately sits far from the final target for minutes at a time, and that is not drift.</summary>
         private void SelfHealEntitySize(RFMechanicsConfig cfg)
         {
-            float target = (float)Pick(cfg.BandSizes, CurrentBand);
+            if (float.IsNaN(lastKnownSize)) return;
+
             float actual = entity.WatchedAttributes.GetFloat("entitySize", 1f);
-            if (Math.Abs(actual - target) <= 0.001f) return;
+            if (Math.Abs(actual - lastKnownSize) <= 0.001f) return;
+
+            float thew = entity.GetBehavior<ThewBehavior>()?.Thew ?? 0f;
+            float target = ComputeTargetSize(thew, cfg);
 
             entity.WatchedAttributes.SetFloat("entitySize", target);
+            lastKnownSize = target;
             RFMechanicsModSystem.TryUpdatePmlEntityProperties(entity, out string message);
             entity.World.Api.Logger.Warning(
                 "[rfmechanics] BandBehavior self-healed entitySize for entity {0}: {1:F3} -> {2:F3} ({3})",

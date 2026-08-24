@@ -789,21 +789,13 @@ namespace rfmechanics
                             return TextCommandResult.Success(string.Format("thew={0:F4} orc={1} (no hunger behavior)", thew, isOrc));
 
                         float satFrac = hunger.Saturation / hunger.MaxSaturation;
-                        float rampMult = ThewBehavior.RampMultiplier(satFrac, cfg);
                         bool proteinGated = ThewBehavior.IsProteinGated(hunger, cfg);
 
                         EnumFoodCategory lastFoodCat = (EnumFoodCategory)entity.Attributes.GetInt(ThewBehavior.LastFoodCategoryKey, (int)EnumFoodCategory.NoNutrition);
                         bool foodTypeBlocksGain = cfg.EnableThewFoodTypeGate && ThewBehavior.IsNonProteinPlantCategory(lastFoodCat);
 
-                        bool gaining = isOrc && proteinGated && rampMult > 0f && !foodTypeBlocksGain;
-                        string decayTier = "(none)";
-                        if (isOrc && !gaining)
-                        {
-                            decayTier = satFrac < (float)cfg.ThewRampFloor
-                                ? ThewBehavior.DecayTierName(hunger, satFrac, cfg)
-                                : "SatedNonProtein";
-                        }
-                        bool decaying = decayTier != "(none)";
+                        string zone = ThewBehavior.SatietyZoneName(hunger, satFrac, cfg);
+                        bool gaining = isOrc && zone == "Gain" && proteinGated && !foodTypeBlocksGain;
 
                         string[] extraTraits = entity.WatchedAttributes.GetStringArray("extraTraits", null);
                         string extraTraitsStr = extraTraits == null ? "(null)" : string.Join(",", extraTraits);
@@ -814,17 +806,17 @@ namespace rfmechanics
                         {
                             BandBehavior.Band band = bandBhv.CurrentBand;
                             float actualSize = entity.WatchedAttributes.GetFloat("entitySize", 1f);
-                            float targetSize = (float)BandBehavior.Pick(cfg.BandSizes, band);
+                            float targetSize = BandBehavior.ComputeTargetSize(thew, cfg);
                             bandStr = string.Format(
-                                "band={0} midLerp={1} entitySize={2:F3} targetSize={3:F3} hungerrateMult={4:F2} walkspeedDelta={5:F2} seekRangeDelta={6:F2} maxHpExtra={7:F1} thewGainMult={8:F2}",
-                                band, bandBhv.MidLerp, actualSize, targetSize,
+                                "band={0} entitySize={1:F3} thewTargetSize={2:F3} sizeRatePerSec={3:F4} hungerrateMult={4:F2} walkspeedDelta={5:F2} seekRangeDelta={6:F2} maxHpExtra={7:F1} thewGainMult={8:F2}",
+                                band, actualSize, targetSize, cfg.SizeChangeRatePerSecond,
                                 BandBehavior.Pick(cfg.HungerRateMult, band), BandBehavior.Pick(cfg.WalkSpeedDelta, band),
                                 BandBehavior.Pick(cfg.AnimalSeekingRangeDelta, band), BandBehavior.Pick(cfg.MaxHpExtraPoints, band),
                                 BandBehavior.Pick(cfg.ThewGainBandMult, band));
                             if (band == BandBehavior.Band.Bulky)
                             {
-                                bandStr += string.Format(" +meleeDamage={0:F2} +bulkyHoldDecay={1:F3}/h armorWalkSpeedAffDelta={2:F2}",
-                                    cfg.BulkyMeleeDamageBonus, cfg.BulkyHoldDecayPerHour, cfg.BulkyArmorWalkSpeedAffectednessDelta);
+                                bandStr += string.Format(" +meleeDamage={0:F2} armorWalkSpeedAffDelta={1:F2}",
+                                    cfg.BulkyMeleeDamageBonus, cfg.BulkyArmorWalkSpeedAffectednessDelta);
                             }
                         }
 
@@ -834,25 +826,60 @@ namespace rfmechanics
                         {
                             var healthBhv = entity.GetBehavior<EntityBehaviorHealth>();
                             string healthStr = healthBhv == null ? "?" : string.Format("{0:F1}/{1:F1}", healthBhv.Health, healthBhv.MaxHealth);
-                            float usableThew = Math.Max(0f, thew - (float)cfg.BurnThewFloor);
-                            double barsRemaining = cfg.BurnThewPerHp > 0 ? usableThew / (cfg.BurnThewPerHp * BurnBehavior.ReferenceBarHp) : 0.0;
                             burnStr = string.Format(
-                                "burnActive={0} health={1} activationGap={2:F2} maxHealPerSec={3:F2} curveExp={4:F1} thewPerHp={5:F3} thewSpentThisBurn={6:F4} barsRemaining={7:F2}",
-                                burnBhv.Burning, healthStr, cfg.BurnActivationHealthFracGap, cfg.BurnMaxHealPerSecond, cfg.BurnCurveExponent, cfg.BurnThewPerHp, burnBhv.ThewSpentThisBurn, barsRemaining);
+                                "burnActive={0} health={1} activationGap={2:F2} maxHealPerSec={3:F2} curveExp={4:F1} thewPerHp={5:F3} debtIncurredThisBurn={6:F4}",
+                                burnBhv.Burning, healthStr, cfg.BurnActivationHealthFracGap, cfg.BurnMaxHealPerSecond, cfg.BurnCurveExponent, cfg.BurnThewPerHp, burnBhv.DebtIncurredThisBurn);
                         }
 
                         string frenzyStr = "(no frenzy behavior)";
                         var frenzyBhv = entity.GetBehavior<FrenzyBehavior>();
                         if (frenzyBhv != null)
                         {
+                            float frenzyCurveMult = FrenzyBehavior.ComputeCurveMult(satFrac, cfg);
+                            bool frenzyStalled = thewBhv != null && thewBhv.Thew <= 0f && (thewBhv.BurnDebt + thewBhv.FrenzyDebt) > 0f;
                             frenzyStr = string.Format(
-                                "frenzyActive={0} curveExp={1:F1} maxSpeedBonus={2:F2} maxDamageBonus={3:F2} maxThewPerSec={4:F3} thewSpentThisFrenzy={5:F4}",
-                                frenzyBhv.Frenzied, cfg.FrenzyCurveExponent, cfg.FrenzyMaxSpeedBonus, cfg.FrenzyMaxDamageBonus, cfg.FrenzyMaxThewPerSecond, frenzyBhv.ThewSpentThisFrenzy);
+                                "frenzyCurveMult={0:F3} stalled={1} walkspeedBonus={2:F3} jumpBonus={3:F3} debtGate={4:F2} thewPerSec={5:F3}",
+                                frenzyCurveMult, frenzyStalled, (float)cfg.FrenzyMaxSpeedBonus * frenzyCurveMult, (float)cfg.FrenzyMaxJumpBonus * frenzyCurveMult, cfg.FrenzyDebtSatietyThreshold, cfg.FrenzyThewPerSecond);
+                        }
+
+                        string debtStr = thewBhv != null
+                            ? string.Format("burnDebt={0:F4} frenzyDebt={1:F4} totalDebt={2:F4} drainPerHour={3:F3}",
+                                thewBhv.BurnDebt, thewBhv.FrenzyDebt, thewBhv.BurnDebt + thewBhv.FrenzyDebt, cfg.DebtDrainPerHour)
+                            : "(no thew behavior)";
+
+                        string resistStr = "(not orc)";
+                        if (isOrc)
+                        {
+                            var healthBhv = entity.GetBehavior<EntityBehaviorHealth>();
+                            if (healthBhv == null)
+                            {
+                                resistStr = "resist=? (no health behavior)";
+                            }
+                            else if (!cfg.EnableOrcWildAnimalResist)
+                            {
+                                resistStr = "resist=0.00 (disabled in config)";
+                            }
+                            else
+                            {
+                                float resist = OrcWildAnimalResistPatch.ComputeResist(healthBhv, cfg);
+                                if (resist <= 0f)
+                                {
+                                    resistStr = string.Format("resist=0.00 (below activation gap {0:F2})", cfg.OrcWildResistActivationHealthFracGap);
+                                }
+                                else if (cfg.OrcWildResistRequiresNoArmor && entity is EntityPlayer entityPlayer && OrcWildAnimalResistPatch.IsWearingArmor(entityPlayer))
+                                {
+                                    resistStr = string.Format("resist=0.00 (wearing armor, would be {0:F3})", resist);
+                                }
+                                else
+                                {
+                                    resistStr = string.Format("resist={0:F3}", resist);
+                                }
+                            }
                         }
 
                         string msg = string.Format(
-                            "thew={0:F4} orc={1} charClass={2} extraTraits=[{3}] satFrac={4:F3} rampMult={5:F3} (floor {6:F2} ceiling {7:F2}) protein={8:F1} dairy={9:F1} proteinGated={10} (threshold {11:F1}, Protein OR Dairy) lastFoodCategory={12} foodTypeBlocksGain={13} gaining={14} decaying={15} decayTier={16} shieldActive={17} {18} {19} {20}",
-                            thew, isOrc, charClass ?? "(null)", extraTraitsStr, satFrac, rampMult, cfg.ThewRampFloor, cfg.ThewRampCeiling, hunger.ProteinLevel, hunger.DairyLevel, proteinGated, cfg.ProteinGateLevel, lastFoodCat, foodTypeBlocksGain, gaining, decaying, decayTier, cfg.StarvationShieldWhileThew && thew > 0f, bandStr, burnStr, frenzyStr);
+                            "thew={0:F4} orc={1} charClass={2} extraTraits=[{3}] satFrac={4:F3} zone={5} (gainGate {6:F2} lowSatietyThreshold {7:F2}) protein={8:F1} dairy={9:F1} proteinGated={10} (threshold {11:F1}, Protein OR Dairy) lastFoodCategory={12} foodTypeBlocksGain={13} gaining={14} {15} {16} {17} {18} {19}",
+                            thew, isOrc, charClass ?? "(null)", extraTraitsStr, satFrac, zone, cfg.ThewGainSatietyGate, cfg.ThewDecayLowSatietyThreshold, hunger.ProteinLevel, hunger.DairyLevel, proteinGated, cfg.ProteinGateLevel, lastFoodCat, foodTypeBlocksGain, gaining, debtStr, bandStr, burnStr, frenzyStr, resistStr);
 
                         return TextCommandResult.Success(msg);
                     })
@@ -875,7 +902,7 @@ namespace rfmechanics
                     })
                 .EndSubCommand()
                 .BeginSubCommand("setband")
-                    .WithDescription("Force-set the calling player's Band directly (testing only) -- bypasses hysteresis, applies stats and starts the entitySize lerp.")
+                    .WithDescription("Force-set the calling player's Band directly (testing only) -- bypasses hysteresis, applies stats only. entitySize is unaffected: it tracks Thew continuously, not band.")
                     .WithArgs(parsers.Word("band", new[] { "lean", "standard", "bulky" }))
                     .HandleWith(args =>
                     {
@@ -1013,6 +1040,8 @@ namespace rfmechanics
                         string pmlCurrentSize = DescribePmlCurrentSize(entity);
                         Vec2f collisionBox = entity.Properties.CollisionBoxSize;
                         float clientSize = entity.Properties.Client.Size;
+                        float eyeHeight = (float)entity.Properties.EyeHeight;
+                        float localEyePosY = (float)entity.LocalEyePos.Y;
 
                         var hunger = entity.GetBehavior<EntityBehaviorHunger>();
                         string hungerStr = hunger == null
@@ -1023,8 +1052,8 @@ namespace rfmechanics
                                 hunger.ProteinLevel, hunger.GrainLevel, hunger.DairyLevel);
 
                         string msg = string.Format(
-                            "marker={0:F3} entitySize(attr)={1:F3} pmlCurrentSize={2} collisionBox=({3:F3},{4:F3}) clientSize={5:F3} {6}",
-                            marker, entitySize, pmlCurrentSize, collisionBox.X, collisionBox.Y, clientSize, hungerStr);
+                            "marker={0:F3} entitySize(attr)={1:F3} pmlCurrentSize={2} collisionBox=({3:F3},{4:F3}) clientSize={5:F3} eyeHeight={6:F3} localEyePosY={7:F3} {8}",
+                            marker, entitySize, pmlCurrentSize, collisionBox.X, collisionBox.Y, clientSize, eyeHeight, localEyePosY, hungerStr);
 
                         return TextCommandResult.Success(msg);
                     })
