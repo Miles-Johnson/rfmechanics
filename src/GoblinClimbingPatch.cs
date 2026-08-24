@@ -16,8 +16,10 @@ namespace rfmechanics
     /// Climbable-flagged, so the dwarf-style extension-of-vanilla-ladder-detection shape never
     /// fires for it -- only TreeClimbingPatch's self-contained-scan shape generalizes.
     /// Tree and rock climbing are independently toggleable; the rock whitelist
-    /// (GoblinRockClimbCodePrefixes) is four explicit prefixes, not a single "rock-"
-    /// StartsWith, so cracked rock/meteorite/stalagmite count as natural while worked stone stays excluded.
+    /// (GoblinRockClimbCodePrefixes) covers raw rock plus rough worked-stone/masonry families,
+    /// see the config's doc comment. Chiseled logs/rock (BlockEntityMicroBlock) are climbable
+    /// via the same fallback TreeClimbingPatch.IsClimbableLog uses for Elves -- see
+    /// IsClimbableGoblinBlock.
     /// </summary>
     [HarmonyPatch(typeof(EntityBehaviorControlledPhysics))]
     public static class GoblinClimbingPatch
@@ -135,11 +137,7 @@ namespace rfmechanics
                 {
                     tmpPos.Y = baseY + dy;
                     Block inBlock = blockAccessor.GetBlock(tmpPos, BlockLayersAccess.Solid);
-                    string path = inBlock?.Code?.Path;
-                    if (path == null) continue;
-
-                    bool matches = (checkTrees && path.StartsWith("log-grown")) || (checkRock && MatchesAnyPrefix(path, rockPrefixes));
-                    if (!matches) continue;
+                    if (!IsClimbableGoblinBlock(entity.World, inBlock, tmpPos, checkTrees, checkRock, rockPrefixes)) continue;
 
                     Cuboidf[] collisionBoxes = inBlock.GetCollisionBoxes(blockAccessor, tmpPos);
                     if (collisionBoxes == null) continue;
@@ -158,6 +156,32 @@ namespace rfmechanics
             }
 
             return false;
+        }
+
+        /// <summary>Chiseling replaces a block's own Code.Path with the generic "chiseledblock", so
+        /// a carved log or rock face no longer matches its prefix directly -- same
+        /// BlockEntityMicroBlock.BlockIds fallback as TreeClimbingPatch.IsClimbableLog, generalized
+        /// to cover both the tree and rock match groups here.</summary>
+        private static bool IsClimbableGoblinBlock(IWorldAccessor world, Block block, BlockPos pos, bool checkTrees, bool checkRock, string[] rockPrefixes)
+        {
+            if (MatchesPath(block?.Code?.Path, checkTrees, checkRock, rockPrefixes)) return true;
+
+            BlockEntity blockEntity = world.BlockAccessor.GetBlockEntity(pos);
+            if (blockEntity is BlockEntityMicroBlock micro && micro.BlockIds != null)
+            {
+                foreach (int id in micro.BlockIds)
+                {
+                    if (MatchesPath(world.GetBlock(id)?.Code?.Path, checkTrees, checkRock, rockPrefixes)) return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool MatchesPath(string? path, bool checkTrees, bool checkRock, string[] rockPrefixes)
+        {
+            if (path == null) return false;
+            return (checkTrees && path.StartsWith("log-grown")) || (checkRock && MatchesAnyPrefix(path, rockPrefixes));
         }
 
         private static bool MatchesAnyPrefix(string path, string[] prefixes)

@@ -524,11 +524,19 @@ public class RFMechanicsConfig
     /// EnableGoblinRockClimbing.</summary>
     public bool EnableGoblinTreeClimbing { get; set; } = true;
 
-    /// <summary>Code.Path prefixes treated as climbable raw rock for goblins. Four prefixes, not
-    /// one: "crackedrock-" is a natural UnstableRock collapse product that doesn't start with
-    /// "rock-". Worked stone (cobblestone/polished/stonebricks/quartz/etc.) is excluded by not
-    /// matching any of these. Config-driven so a modded rock-alike block can be added without a code change.</summary>
-    public string[] GoblinRockClimbCodePrefixes { get; set; } = new[] { "rock-", "crackedrock-", "meteorite-", "stalagsection-" };
+    /// <summary>Code.Path prefixes treated as climbable rock/masonry for goblins. Split by
+    /// texture roughness, not material: raw rock, worked stone/brick masonry, and ore veins
+    /// are all rough enough to grip. Polished stone, quartz, tile, glass, and loose material
+    /// (gravel/sand) are excluded by not matching any of these, as are non-full-cube shapes
+    /// (slabs/stairs/course/grating). Config-driven so a modded rock-alike block can be added
+    /// without a code change.</summary>
+    public string[] GoblinRockClimbCodePrefixes { get; set; } = new[]
+    {
+        "rock-", "crackedrock-", "meteorite-", "stalagsection-",
+        "cobblestone-", "mossycobblestone-", "lichencobblestone-",
+        "stonebricks-", "agedstonebricks-", "crackedstonebricks-", "mossybrick-", "lichenbrick-",
+        "claybricks-", "drystone-", "mudbrick-", "peatbrick-", "refractorybrick-", "ore-"
+    };
 
     // ── Goblin tunnel speed (Phase G2) ──
 
