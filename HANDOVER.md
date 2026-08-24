@@ -1,4 +1,177 @@
-# rfmechanics — handover (as of 2026-08-22)
+# rfmechanics — handover (as of 2026-08-24)
+
+**Orc Thew/Band/Burn/Frenzy full rework (2026-08-24): all 7 phases built and deployed, not yet
+confirmed in-game.** Full as-built detail, including the day-length-invariance fix and the
+`jumpHeightMul`-additivity confirmation, in
+`notes/race-mechanics/orc-thew-rework-2026-08-24-as-built.md` — start there, not here. Summary:
+deleted the eat-pulse patch, the starvation shield, the Bulky hold-decay, the sated-non-protein
+decay, and Frenzy's melee-damage bonus; replaced Thew's ramp/tier gain-decay model with three
+flat satiety zones anchored to `world.Calendar.ElapsedHours` (in-game hours, not real hours --
+a real fix, the old code was genuinely real-hour-anchored despite its own docs); replaced
+death's flat Thew penalty with a pull-down-only reset cap; added a Thew-debt system so Burn/
+Frenzy no longer spend Thew directly (new `ThewDebtRepayPatch.cs`, `BurnDebt`/`FrenzyDebt` on
+`ThewBehavior`); rebuilt Frenzy as a passive satiety-driven ramp (no more health-fraction
+activation) granting `jumpHeightMul` as well as walkspeed; replaced Bands' entitySize lerp with
+a continuous Thew-derived size under a real-second rate cap (`BandBehavior.ComputeTargetSize`);
+added a client-side "puff" particle cue driven by a new `rf-orc-state` watched byte
+(`OrcPuffModSystem.cs`); and gave `OrcSmellModSystem` a hunger-scaled range bonus plus a
+128-block hard cap matching the server's own entity-tracking cutoff. This entry supersedes the
+Thew ramp/tier and Bands rows below and in `notes/race-mechanics/README.md` -- none of the
+superseded rows' "build-verified only" caveats carry forward as separately-tracked open items.
+
+**Orc Band jump height (2026-08-23): built and deployed, not yet confirmed in-game.** New
+`JumpHeightMulDelta` `OrcBandTriple` in `RFMechanicsConfig.cs` (Lean +2.0, Standard +1.0,
+Bulky 0.0), wired into `BandBehavior.ApplyBandStats`/`ClearBandStats` under the existing
+`"rf-orc-band"` source. Sets vanilla's `jumpHeightMul` stat, which turns out to scale jump
+height *linearly* with the blended value itself (`PModuleOnGround.cs`: velocity is
+multiplied by `sqrt(blended)`, so height ∝ velocity² ∝ blended) — so blended 3.0/2.0 give
+Lean/Standard 3x/2x base jump height respectively. This is an *increase*, which passes
+straight through the stat's `MathF.Max(1f, blended)` floor with no patch needed, unlike the
+long-standing `BulkyJumpHeightReduction_UNWIRED` field (still correctly left unwired — a
+reduction below 1.0 needs a Harmony patch on `PModuleOnGround.DoApply` that hasn't been
+built). `dotnet build -c Release`: 0 errors, 37 warnings (same baseline). Redeployed to the
+live install, game closed at deploy time.
+
+**Tuning pass — Goblin flies, Orc seasons/floor/smell (2026-08-23): built and deployed, not
+yet confirmed in-game.** Four config-driven fixes from user feedback on live play:
+`GoblinRotFliesHalfLifeHours` 4.0 → 48.0 and `GoblinRotFliesCap` 1.0 → 5.0 (matches the visible
+fly signal's decay to `dietsetup:rotIntake`'s 48h aura, raises the cap so a heavy- vs. light-rot
+eater stay visually distinct); `SeasonalGainEnabled` false → true with `Fall` 1.4 / `Winter` 0.6
+(Spring/Summer untouched) so orcs bulk before winter and lean out through it; `SmellRangeBase`
+120.0 → 60.0 so `OrcSmellModSystem.DetectSources`'s range reads as size-driven
+(`SmellRangePerSize`, unchanged at 40.0) rather than a flat tracker. One code change:
+`ThewBehavior.cs` gained a `rf-orc-thew-initialized` sentinel (`entity.Attributes`, set once
+ever) and a new `ThewCreationFloor` config field (0.4) applied the first tick an entity is ever
+detected as orc, so a brand-new orc starts at Standard instead of spending ~3.5 in-game hours in
+Lean at `ThewGainPerHour` 0.1. `dotnet build -c Release`: 0 errors, 37 warnings (same baseline).
+Redeployed to the live install, game closed at deploy time.
+
+**Orc Smell — particle size now scales with prey size (2026-08-23), same-session follow-up to
+the tuning pass above, not yet confirmed in-game.** `OrcSmellModSystem.EmitJet` now sets the
+particle quad's `MinSize`/`MaxSize` per source instead of the old fixed `0.12f` template
+constant, using the same `size = e.Properties.CollisionBoxSize.X` value `SmellRangePerSize`/
+`SmellThicknessDegPerSize` already consumed. Four new config fields: `SmellParticleSizeBase`
+(0.10), `SmellParticleSizePerSize` (0.05), `SmellParticleSizeMin` (0.08, floor so small prey
+doesn't shrink to an illegible speck), `SmellParticleSizeMax` (0.28, ceiling so large prey
+doesn't blow up into a blob). `dotnet build -c Release`: 0 errors, 37 warnings (same baseline).
+Redeployed to the live install, game closed at deploy time. Deploy verified byte-identical
+against the build output post-copy. Live `ModConfig/rfmechanics.json` has since gone through a
+load/self-heal cycle (game launched) with all 4 new `SmellParticleSize*` keys present and
+values intact — confirms the schema change loads cleanly, **not** evidence of the visual effect
+itself being smoke-tested yet.
+
+**Orc Wild-Animal Resist — built and deployed (2026-08-23), not yet confirmed in-game.**
+Standalone Harmony prefix (`OrcWildAnimalResistPatch.cs`) on `EntityBehaviorHealth.
+OnEntityReceiveDamage`: a low-health, unarmored orc takes reduced damage from wild-animal
+attackers, computed from health alone via a curve that's continuous at its activation
+threshold (`OrcWildResistActivationHealthFracGap`, default 0.5). Any of the 3 vanilla armor
+slots zeroes it. Wild-animal classification is a deliberate duplicate of
+`OrcSmellClassifier.IsSmellableFauna` (same `EntityBehaviorHarvestable`+`creatureDiet` check),
+not a shared call. An earlier plan to also decouple Frenzy's speed/melee bonuses from Thew was
+reversed mid-review — `FrenzyBehavior.cs`/`ThewBehavior.cs` are untouched by this pass; the
+resist is intentionally standalone specifically because Frenzy requires Thew to activate, and
+this exists for the Thew-starved orc Frenzy can't help. New config block in
+`RFMechanicsConfig.cs` (5 keys), `/rfthew dump` gained a fourth diagnostic block. Full detail:
+`notes/race-mechanics/orc-wild-animal-resist-as-built.md`.
+
+**Orc Smell v1 — built (2026-08-23), not yet confirmed in-game.** Client-only particle effect:
+an orc gets a vague direction/rough-distance sense of nearby fauna via a drifting band on a shell
+around the *player* (never drawn at the source). New files `OrcSmellModSystem.cs`/
+`OrcSmellClassifier.cs`, new `// ── Orc Smell (v1) ──` config block (17 keys) in
+`RFMechanicsConfig.cs`. Built from scratch, not a port — a prior brief claimed a "Phase-2 smell
+implementation" existed to replace; exhaustive search confirmed it never did. Six real bugs found
+and fixed in review before any in-game test (particle density inverted against spread, vertical
+scan range 4x too generous, exception handling that logged "disabling" without disabling anything,
+tick-cadence read from a possibly-null config at registration time, plus two comment/behavior
+claims independently verified correct against decompiled 1.22 source). Full detail, all six fixes,
+and what to preserve if this gets substantially reworked: `notes/race-mechanics/orc-smell-v1-handover.md`.
+Start there, not here.
+
+**Goblin Phase G4 (rot flies) — built (2026-08-22), supersedes the design-only entry directly
+below.** Two fly populations. `GoblinSpitChargeGrantPatch.cs` gained a second write beside the
+existing charge grant: `rfmechanics:rotFlies`/`rotFliesUpdatedHours` (decay-then-add, 4h
+half-life, `+0.34`/rot capped at 1.0 — a sibling signal, never reads `dietsetup:rotIntake`,
+which sits near steady-state 0.5 for any imperfectly-fresh food and can't express "ate no rot").
+`GoblinRotFliesShared.cs` holds the live-decay reader and the client-side goblin scan both
+populations share.
+
+Aura flies (`GoblinAuraFliesModSystem.cs`): vanilla `EnumParticleModel.Quad` particles via
+`RegisterAsyncParticleSpawner`, no custom renderer. Count from `rotFlies` (10-150), radius from
+`dietsetup:rotIntake` through `GoblinRotAuraBehavior.ComputeShape` (exact match to the invisible
+aura's own footprint) — rejection-sampled into the cylinder, density-weighted by a falloff shaped
+like `GoblinRotAuraRegistry.SpatialFalloff` but with the horizontal edge pushed 15% out so the
+boundary isn't a hard line. Per-goblin centroid lag (2.0s time constant, live-tunable via
+`/rfflieslag`) and a breathing radius (10%, 20s period, phase offset from `entityId`).
+
+Spit flies (`GoblinSpitFliesModSystem.cs`): exact count (0-6, == `spitCharges`, no floor/scaling)
+needs precision particles can't guarantee, so this is a real `IRenderer` — one `QuadMeshUtil`
+quad uploaded once, per-instance matrix, camera-facing via `RiftRenderer`'s technique (translate
+into camera-relative space, `ReverseMul` the camera matrix, zero the rotation columns), own
+minimal shader (`assets/rfmechanics/shaders/rfspitflies.vsh/.fsh` — texture sample + tint +
+opacity, none of Rift's framebuffer-sampling distortion), registered at `EnumRenderStage.AfterBlit`
+matching `GoblinDarkvisionModSystem`'s convention. Depth test left at its default (on) — never
+toggled. Mesh is uploaded once in the constructor and never rebuilt; only the per-instance
+model-view matrix and the `opacity` uniform change per frame, and shader `Use()`/texture
+bind/blend-toggle happen once per frame outside the per-fly loop, not per-instance. Texture is a
+new hand-drawn 16x16 `assets/rfmechanics/textures/entity/rotflies/fly.png`, loaded standalone via
+`GetOrLoadTexture` (confirmed via the decompiled `ClientMain.GetOrLoadCachedTexture` that this
+path passes `generateMipmaps=false` — atlas insertion would have forced mipmaps and faded this
+texture at distance, per the earlier rendering-findings pass). Polls `spitCharges` every frame
+(not event-driven) so charges present at login/relog show immediately; per-fly fade in/out over
+0.4s on join/leave.
+
+**Distance re-tuned same day (third pass)**: `GoblinSpitFliesRadius` 0.6 -> 4.5,
+`GoblinSpitFliesVerticalExtent` 0.9 -> 0.45, matching More Bugs' own `RotPlayerFlyRoamRadiusBlocks`/
+`RotPlayerFlyVerticalRangeBlocks` defaults (4.5 / 0.45, both unmodified in the live
+`ModConfig/morebugs.json`) — decompiled `RotFlySource.cs`/`RotFlyAgent.cs` via `ilspycmd` to
+confirm those two fields are literally the polar roam radius and vertical jitter band around
+`home` for the player-carried ("holding rot in inventory") fly population, not just plausibly-named
+fields. Reference only, per the original build prompt's scope — no code dependency on More Bugs.
+Live `ModConfig/rfmechanics.json` updated to match (its stored values silently override the C#
+defaults on load, same as the `BluntCrushResistDelta`/`EnableChunkScarTracker` precedent
+elsewhere in this doc, so the code-default edit alone would have been a no-op in-game).
+
+**Frame cost**: not measured against a live client — no second client was available this session
+(see the verification note below). Reasoned estimate: at max charges with two goblins in view,
+that's at most 12 draw calls/frame, each a 4-vertex/6-index quad with one matrix + one float
+uniform update against an already-bound texture and an already-`Use()`'d minimal shader; this
+should be well under the noise floor of a frame budget on any hardware capable of running the
+game at all. Treat this as a reasoned estimate pending an actual in-game check, not a
+measurement.
+
+**Step 1 (cross-client `WatchedAttributes` verification) was not empirically completed** — no
+second client was available. A temporary client-side diagnostic command,
+`TempFlyCheckDiag.cs` (`/rfflycheck <playername>`), was built and deployed specifically to make
+that check trivial once a second client exists; it reads a named player's `characterClass`/
+`dietsetup:rotIntake`/`rfmechanics:spitCharges` off *this* client's own synced state, no server
+round-trip. Proceeding past this gate was a deliberate, user-approved call based on strong
+indirect evidence instead: `WatchedAttributes` is a generic `SyncedTreeAttribute`, broadcast via
+the same dirty-path-diff mechanism (traced through the decompiled `ServerPackets`/
+`PhysicsManager`) that already carries `onHurt`/`entityDead`/nametag data to every client tracking
+an entity — visible every time you've ever seen another player get hurt or die in vanilla
+multiplayer. `dietsetup:rotIntake` and `rfmechanics:spitCharges` ride the identical mechanism, no
+namespace-based branching exists in the sync path. **Run `/rfflycheck` for real before trusting
+this in a shared session** — if it comes back `<null/default>` for any of the three keys, this
+whole feature needs a broadcast packet instead, per the original build prompt's own stop
+condition. Delete `TempFlyCheckDiag.cs` once confirmed either way.
+
+New config: `GoblinRotFlies*`/`GoblinSpitFlies*` block in `RFMechanicsConfig.cs`, reusing the rot
+aura's own `GoblinRotAuraRadiusMin/Max`/`VerticalHalfExtent` rather than duplicating them. Master
+toggles `EnableGoblinRotFlies`/`EnableGoblinSpitFlies`, both default true. New diagnostic commands
+below.
+
+Build: `dotnet build -c Release` after deleting `bin\Release\Mods\`, clean (0 errors). Deployed to
+the live install.
+
+**Goblin Phase G4 (rot flies) — design/investigation handover only, no code written
+(2026-08-22).** Player wants goblins to grow a visible fly swarm scaled by how much rot
+they've eaten. Full handover, including the already-existing rot-intake pipeline to reuse
+(`dietsetup:rotIntake` → `GoblinRotAuraBehavior.ReadLiveRotIntake`), a More Bugs mod
+decompile writeup (inspiration only, not a dependency — its relevant classes are `internal`
+and local-player-only), an unverified cross-client `WatchedAttributes` risk that must be
+checked before writing any render code, and three design options (none chosen yet — needs a
+user decision on effort/fidelity and self-view vs. all-observers visibility) at
+`notes/race-mechanics/goblin-phase-g4-rotflies-handover.md`. Start there, not here.
 
 **Chunk scar tracker: elf-buff wiring planned, approved, then cancelled before implementation
 (2026-08-22).** A design to scale forage yield (`forageDropRate`), wild-crop yield
@@ -21,12 +194,11 @@ feature and wire it up without reading the archived doc first.
 
 One config field renamed: `EnableChunkScarTracker` → `ChunkScarTrackingEnabled` (same default
 `true`, same semantics — gates `ChunkScarBreakPatch`'s write path only, never `/rfscar`'s reads).
-The live deployed `ModConfig/rfmechanics.json` still has the old key as of this pass; it
-self-heals on the next load/store cycle the same way the `RangedAccDelta`/`BluntCrushResistDelta`
-rename did (see `notes/race-mechanics/README.md`'s footnote 1) — `LoadConfig` always calls
-`api.StoreModConfig` after loading, so the old key is silently dropped and the new one written
-with its default. No risk here specifically: the live value was already `true`, matching the new
-default.
+**Self-healed, confirmed 2026-08-23**: the live `ModConfig/rfmechanics.json` now has
+`ChunkScarTrackingEnabled: true` and no `EnableChunkScarTracker` key — the same load/store
+self-heal the `RangedAccDelta`/`BluntCrushResistDelta` rename already went through (see
+`notes/race-mechanics/README.md`'s footnote 1). No risk was ever realized here: the live value
+was already `true`, matching the new default.
 
 Build: `dotnet build -c Release` after deleting `bin\Release\Mods\` — 0 errors, 37 warnings,
 same baseline as every prior entry in this file. `python tools/docs-check.py` run clean against
@@ -232,7 +404,7 @@ behavior class).
 | File | Patches | Trait gate | Config keys | What it does |
 | --- | --- | --- | --- | --- |
 | `MiningSpeedPatch.cs` | `CollectibleObject.GetMiningSpeed` (postfix) | `DwarfTraitCode`, `GoblinTraitCode` | `EnableMiningCurve`, `MiningDepthWeight`, `MiningAltitudeWeight`, `MiningBonusCap`, `EnableGoblinStonePenalty`, `GoblinStoneMiningFactor` | Depth/altitude mining-speed bonus for dwarves, gated to Ore/Stone material (mirrors vanilla's own gate at `CollectibleObject.cs:621-624`). **Extended 2026-08-06 (Phase G2)**: flat stone-mining penalty for goblins (`GoblinStoneMiningFactor`, default 0.4) in the same postfix, sequential trait checks, same coexistence shape as `FallDamagePatch`'s multi-race handling. |
-| `GoblinClimbingPatch.cs` | `EntityBehaviorControlledPhysics.MotionAndCollision` + `.ApplyTests` (both postfix) | `GoblinTraitCode` | `EnableGoblinRockClimbing`, `EnableGoblinTreeClimbing`, `GoblinRockClimbCodePrefixes` | **New 2026-08-06 (Phase G2).** Parallel to `TreeClimbingPatch` (Elf), not an extension of it — raw rock is never vanilla `Climbable`-flagged, so the dwarf-style `ClimbSpeedPatch`/`ClimbCollideAssistPatch` shape (which extends vanilla's own ladder detection) would never fire for it; only `TreeClimbingPatch`'s self-contained-scan shape generalizes. Two independent match groups, each its own toggle: `"log-grown"` (tree, same as Elf) and a config-driven raw-rock whitelist (`rock-`, `crackedrock-`, `meteorite-`, `stalagsection-` — four prefixes, not one, see Part A report A2). **No saturation cost** — researched and confirmed vanilla's own `EntityBehaviorHunger.SlowTick` has no `IsClimbing`-specific term at all, so this doesn't introduce an asymmetry against vanilla's free ladder climbing. **Confirmed working in-game (2026-08-14), part of the Goblin G2 pass.** |
+| `GoblinClimbingPatch.cs` | `EntityBehaviorControlledPhysics.MotionAndCollision` + `.ApplyTests` (both postfix) | `GoblinTraitCode` | `EnableGoblinRockClimbing`, `EnableGoblinTreeClimbing`, `GoblinRockClimbCodePrefixes` | **New 2026-08-06 (Phase G2).** Parallel to `TreeClimbingPatch` (Elf), not an extension of it — raw rock is never vanilla `Climbable`-flagged, so the dwarf-style `ClimbSpeedPatch`/`ClimbCollideAssistPatch` shape (which extends vanilla's own ladder detection) would never fire for it; only `TreeClimbingPatch`'s self-contained-scan shape generalizes. Two independent match groups, each its own toggle: `"log-grown"` (tree, same as Elf) and a config-driven whitelist covering raw rock plus rough worked stone/brick masonry and ore veins (18 prefixes, expanded 2026-08-22 from the original 4 raw-rock-only prefixes to include cobblestone/stonebrick/claybrick/drystone/mudbrick/peatbrick/refractorybrick/ore families — see `GoblinRockClimbCodePrefixes` in `RFMechanicsConfig.cs`; polished stone, quartz, tile, glass, and loose material stay excluded). **Chiseled logs/rock climbable too** (2026-08-22) — `IsClimbableGoblinBlock` falls back to `BlockEntityMicroBlock.BlockIds` when the block's own `Code.Path` reads as the generic `"chiseledblock"`, same mechanism as `TreeClimbingPatch.IsClimbableLog` uses for Elves. **No saturation cost** — researched and confirmed vanilla's own `EntityBehaviorHunger.SlowTick` has no `IsClimbing`-specific term at all, so this doesn't introduce an asymmetry against vanilla's free ladder climbing. **Confirmed working in-game (2026-08-14), part of the Goblin G2 pass.** |
 | `RFGoblinTunnelBehavior.cs` | `EntityBehavior` (`OnGameTick`), attached via `patches/seraph-goblintunnel.json`, registered as `"rfgoblintunnel"` (`RFMechanicsModSystem.cs:40`) | `GoblinTraitCode` (checked in `IsGoblin()`, inline, not a Harmony patch) | `EnableGoblinTunnelSpeed`, `GoblinTunnelSpeedBonus` (0.15, bumped from 0.12 at G2.1 review), `GoblinTunnelStatWriteThreshold` | **New 2026-08-06 (Phase G2), earth-check unified 2026-08-06 (G2.1).** Walkspeed bonus for goblins tunneling under diggable earth — `RFTreeProximityBehavior`'s exact pattern (3s tick, not Thew/Band's 6s), but a narrow 2-block directional column check (`headY+1`/`headY+2`) instead of a radius `WalkBlocks` scan. Hysteresis: entry needs only the near sample, exit needs both to fail. Writes `Stats.Set("walkspeed", "tunneling", value)`. Condition delegates to the disabled `GoblinSpitPackingPatch.IsGoblinEarth` (see Disabled/superseded below — that class is unregistered but its static predicate is still called directly, not via Harmony) instead of maintaining its own `Code.Path` prefix list. **Confirmed working in-game (2026-08-14), part of the Goblin G2 pass.** |
 | `ElfLeafDropPatch.cs` | `Block.GetDrops` (postfix, appends to `__result`) | `ElfTraitCode` | `EnableElfLeafGathering` | **New 2026-08-06 (Phase G2), duplication bug fixed 2026-08-06 (G2.1).** Appends a self-drop (`leaves-placed-{wood}`/`leavesbranchy-placed-{wood}`, grown-stage-to-placed conversion) to vanilla's existing `treeseed`/`stick` drops for elves breaking `leaves-`/`leavesbranchy-` blocks — appends, does not replace. **Naturally-generated leaves only**: gated on `!path.Contains("-placed-")`, since the original version also re-triggered on breaking an already-placed leaf block, letting elves compound leaves indefinitely by planting and re-harvesting. **Closes G1's open branchy-leaves ingredient-sourcing gap.** **Confirmed working in-game (2026-08-14), part of the Goblin G2 pass.** |
 | `OreYieldPatch.cs` | `Block.GetDrops` (prefix) | `DwarfTraitCode` | `EnableOreCurve`, `OreThreshold`, `OreCeiling` | Depth-only ore yield bonus for dwarves, Ore-material only (server-side only — drops only spawn server-side). Stacks multiplicatively with any `oreDropRate` trait stat, doesn't currently share a value with one. |
@@ -244,17 +416,23 @@ behavior class).
 | `TreeClimbingPatch.cs` | `EntityBehaviorControlledPhysics.MotionAndCollision` + `.ApplyTests` (both postfix) | `ElfTraitCode` | `EnableTreeClimbing` | **New 2026-08-04.** Lets Elves climb standing tree trunks as if they were ladders. **Confirmed working in-game.** |
 | `FallDamagePatch.cs` | `EntityBehaviorHealth.OnEntityReceiveDamage` (prefix) | `ElfTraitCode`, `GoblinTraitCode` | `EnableFallDamageReduction`, `FallDamageReductionFactor`, `EnableGoblinFallDamageReduction`, `GoblinFallDamageReductionFactor` | **New 2026-08-04 (Elf), extended 2026-08-06 (Goblin).** Reduces fall damage for Elves by `FallDamageReductionFactor` (default 60%) and for Goblins by `GoblinFallDamageReductionFactor` (default 50%). **Elf path confirmed working in-game (2026-08-04); Goblin path smoke-tested 2026-08-06, not independently re-verified after the Goblin extension.** |
 | `GoblinDarkvisionModSystem.cs` | Not a Harmony patch — client-only `ModSystem`/`IRenderer`, auto-discovered by the engine (not called from `RFMechanicsModSystem.Start()`), `OnRenderFrame` on `EnumRenderStage.Before` | `GoblinTraitCode` | `EnableGoblinDarkvision`, `GoblinDarkvisionStrength` | **New 2026-08-06.** Constant-strength (0.8) darkvision for Goblins, composes with vanilla night-vision goggles via `Math.Max`. **Smoke-tested 2026-08-06 (three goggle-compose cases passed).** |
-| `ThewBehavior.cs` | `EntityBehavior` (`OnGameTick`), attached via `patches/seraph-thew.json`; also overrides `OnEntityDeath` | `OrcTraitCode` (checked in `IsOrc()`, inline, not a Harmony patch) | `EnableThew`, `OrcTraitCode`, `ThewGainPerHour`, `ThewGainBandMult`, `ThewRampFloor`, `ThewRampCeiling`, `ThewPerBite`, `BiteCooldownSec`, `BulkyHoldDecayPerHour`, `ThewDecayUnderfedPerHour`, `ThewDecayHungryPerHour`, `ThewDecayStarvingPerHour`, `ThewHungryThreshold`, `StarvationShieldWhileThew`, `ProteinGateLevel`, `SeasonalGainEnabled`, `SeasonalGainMultipliers`, `OrcStomachMultiplier`, `StomachStackingMode`, `EnableThewDeathPenalty`, `ThewDeathPenalty` | **New 2026-08-05, reworked twice same day.** Hidden per-player Thew float (0–1) for orcs. Gain: graded ramp × `ThewGainBandMult[currentBand]`, protein-gated. Decay below the ramp floor: three named tiers. **Original binary-gate version confirmed working in-game 2026-08-05; the reworked ramp/tier version is NOT yet re-verified** — see Testing status. |
-| `BandBehavior.cs` | `EntityBehavior` (`OnGameTick`), attached via `patches/seraph-thew.json` (same file as `rfthew`), registered as `"rfband"` (`RFMechanicsModSystem.cs:38`) | `OrcTraitCode` (own `IsOrc()`, duplicated not shared) | `EnableBands`, `BandUpThresholds`, `BandDownThresholds`, `BandSizes`, `BandSizeLerpSeconds`, `HungerRateMult`, `WalkSpeedDelta`, `MaxHpExtraPoints`, `AnimalSeekingRangeDelta`, `BulkyMeleeDamageBonus`, `RangedAccDelta`, `BulkyArmorWalkSpeedAffectednessDelta`, plus two `_UNWIRED` reserved fields (see below) | **New 2026-08-05, Phase 3 Part B.** Lean/Standard/Bulky hysteresis state machine driven off `ThewBehavior`'s Thew value (up 0.35/0.70, down 0.30/0.64). Owns `entitySize` (lerps ~10s on cross, self-heals every slow tick if it drifts). Applies/clears, once per band cross, `Stats.Set` under source key `"rf-orc-band"`: `hungerrate`, `walkspeed`, `animalSeekingRange`, `meleeWeaponsDamage`, `armorWalkSpeedAffectedness`, `maxhealthExtraPoints`, `rangedWeaponsAcc`. **Corrected 2026-08-13**: this table previously listed a `BluntCrushResistDelta` config key and `bluntDamageFactor`/`crushingDamageFactor` stat writes — verified against current source (`RFMechanicsConfig.cs:325`, `BandBehavior.cs:185-191`) that the field is now `RangedAccDelta` and the stat written is `rangedWeaponsAcc`; `BandBehavior.Initialize()` (`:44-55`) explicitly removes the two old stats as one-time migration cleanup. The live deployed `ModConfig/rfmechanics.json` still has the old `BluntCrushResistDelta` key as of this pass — see `notes/diagnostics/config-versioning-phase-a-survey.md`. Two stats from the locked design table are still **NOT wired**: jump height and knockback — see `notes/race-mechanics/orc-phase3-partB-bands.md` Deviations. |
-| `ThewEatPulsePatch.cs` | `EntityBehaviorHunger.OnEntityReceiveSaturation` (postfix) | `OrcTraitCode` | `ThewPerBite`, `BiteCooldownSec` | **New 2026-08-05 (Addendum 1).** Small flat Thew grant per qualifying eat event, cooldown-gated per player. **Not yet verified in-game.** |
-| `ThewShieldPatch.cs` | `EntityBehaviorHealth.OnEntityReceiveDamage` (prefix) | `OrcTraitCode` | `StarvationShieldWhileThew` | **New 2026-08-05 (Addendum 2).** While an orc's Thew > 0, zeroes incoming `EnumDamageType.Hunger` damage. **Not yet verified in-game.** |
-| `BurnBehavior.cs` | `EntityBehavior` (`OnGameTick`, `OnEntityReceiveDamage`), attached via `patches/seraph-thew.json`, registered as `"rfburn"` (`RFMechanicsModSystem.cs:39`) | `OrcTraitCode` (`IsOrc()`, inline) | `EnableBurn`, `BurnHealthFraction`, `BurnHealPerSecond`, `BurnThewPerHp`, `BurnThewFloor`, `BurnFastTickMs` | **Not previously in this table despite being live since Phase 4 — added 2026-08-13.** Below `BurnHealthFraction` of MaxHealth, an orc with Thew above `BurnThewFloor` burns Thew to heal rapidly via a temporary fast tick listener (`BurnFastTickMs`, default 500ms). **Shipped, but implements the superseded flat/threshold model, not the locked cubic-curve spec** — see Testing status below and `notes/race-mechanics/orc-phase4-burn-to-survive-design.md`. Needs a real code fix, not a doc fix. |
+| `ThewBehavior.cs` | `EntityBehavior` (`OnGameTick`), attached via `patches/seraph-thew.json`; also overrides `OnEntityDeath` | `OrcTraitCode` (checked in `IsOrc()`, inline, not a Harmony patch) | `EnableThew`, `OrcTraitCode`, `ThewGainPerHour`, `ThewGainBandMult`, `ThewGainSatietyGate`, `ThewDriftPerHour`, `ThewDecayLowSatietyThreshold`, `ThewDecayLowSatietyPerHour`, `ThewDecayStarvingPerHour`, `ProteinGateLevel`, `SeasonalGainEnabled`, `SeasonalGainMultipliers`, `OrcStomachMultiplier`, `StomachStackingMode`, `ThewDeathResetCap`, `DebtDrainPerHour`, `EnablePuff`, `HeavyDebtThreshold` | **Reworked 2026-08-24, see `notes/race-mechanics/orc-thew-rework-2026-08-24-as-built.md`.** Hidden per-player Thew float (0-1) for orcs, plus `BurnDebt`/`FrenzyDebt` counters and the `rf-orc-state` puff-cue byte. Gain/drift/decay are three flat satiety zones (no ramp), anchored to `world.Calendar.ElapsedHours` (in-game hours). **Build-verified only, NOT yet confirmed in-game** — see Testing status. |
+| `BandBehavior.cs` | `EntityBehavior` (`OnGameTick`), attached via `patches/seraph-thew.json` (same file as `rfthew`), registered as `"rfband"` (`RFMechanicsModSystem.cs:38`) | `OrcTraitCode` (own `IsOrc()`, duplicated not shared) | `EnableBands`, `BandUpThresholds`, `BandDownThresholds`, `BandSizes`, `SizeChangeRatePerSecond`, `HungerRateMult`, `WalkSpeedDelta`, `MaxHpExtraPoints`, `AnimalSeekingRangeDelta`, `BulkyMeleeDamageBonus`, `RangedAccDelta`, `BulkyArmorWalkSpeedAffectednessDelta`, `JumpHeightMulDelta`, plus two `_UNWIRED` reserved fields (see below) | **Reworked 2026-08-24.** Lean/Standard/Bulky hysteresis state machine driven off `ThewBehavior`'s Thew value (up 0.35/0.70, down 0.30/0.64), for stats only now — `entitySize` is a separate continuous function of Thew (`ComputeTargetSize`), rate-capped at `SizeChangeRatePerSecond` (replaces the old lerp-on-cross). Applies/clears `Stats.Set` under source key `"rf-orc-band"`: `hungerrate`, `walkspeed`, `animalSeekingRange`, `meleeWeaponsDamage`, `armorWalkSpeedAffectedness`, `maxhealthExtraPoints`, `rangedWeaponsAcc`, `jumpHeightMul`. **Build-verified only, NOT yet confirmed in-game.** |
+| `ThewDebtRepayPatch.cs` | `EntityBehaviorHunger.OnEntityReceiveSaturation` (postfix) | `OrcTraitCode` | `DebtRepaidPerSaturationPoint` | **New 2026-08-24, replaces the deleted `ThewEatPulsePatch.cs`/`ThewShieldPatch.cs` (a fresh class on the same hook, not a repurposed one).** Repays `BurnDebt` then `FrenzyDebt` on every eat, funded by saturation rather than Thew; also restamps `LastFoodCategoryKey`. **Not yet verified in-game.** |
+| `BurnBehavior.cs` | `EntityBehavior` (`OnGameTick`, `OnEntityReceiveDamage`), attached via `patches/seraph-thew.json`, registered as `"rfburn"` (`RFMechanicsModSystem.cs:39`) | `OrcTraitCode` (`IsOrc()`, inline) | `EnableBurn`, `BurnActivationHealthFracGap`, `BurnMaxHealPerSecond`, `BurnCurveExponent`, `BurnThewPerHp`, `BurnThewFloor`, `BurnFastTickMs` | **Debt-routed 2026-08-24** (was still the superseded flat/threshold model as of 2026-08-13 — see Testing status). Below `BurnActivationHealthFracGap` of MaxHealth, an orc with Thew above `BurnThewFloor` heals via the locked cubic curve, incurring `BurnDebt` (`BurnThewPerHp` per HP) instead of spending Thew directly. **Build-verified only, NOT yet confirmed in-game.** |
+| `FrenzyBehavior.cs` | `EntityBehavior`, one `RegisterGameTickListener` registered unconditionally in `Initialize` (no start/stop) | `OrcTraitCode` (`IsOrc()`, inline) | `EnableFrenzy`, `FrenzySatietyGate`, `FrenzyCurveExponent`, `FrenzyMaxSpeedBonus`, `FrenzyMaxJumpBonus`, `FrenzyDebtSatietyThreshold`, `FrenzyThewPerSecond`, `FrenzyFastTickMs`, `FrenzyStatWriteThreshold` | **Not previously in this table — added 2026-08-24 alongside its satiety rework.** Passive: every fast tick, ramps `walkspeed`/`jumpHeightMul` from the orc's current satFrac (zero at `FrenzySatietyGate` 0.50, full at 0), free above `FrenzyDebtSatietyThreshold` and debt-funded below it. Stops only when Thew is 0 with debt outstanding. **Not yet verified in-game.** |
 | `PreservedProteinPatch.cs` | `CollectibleObject.tryEatStop` (prefix) + `EntityBehaviorHunger.OnEntityReceiveSaturation` (prefix) | `OrcTraitCode` | `PreservedProteinItemCodes`, `PreservedProteinMultiplier` | **New 2026-08-05. Dormant** — the default item list has no obtainable production path in this install (config surface for modded preserved foods). |
 | `GoblinRotAuraBehavior.cs` | `EntityBehavior` (`OnGameTick`, `OnEntityDespawn`), attached via `seraph-goblinrotaura.json`, registered as `"rfgoblinrotaura"` (`RFMechanicsModSystem.cs:41`) | `GoblinTraitCode` (`IsGoblin()`, inline) | `EnableGoblinRotAura`, `EnableGoblinRotAuraCarriedInventory`, `GoblinRotAuraTickInterval`, `GoblinRotAuraRadiusMin/Max`, `GoblinRotAuraVerticalHalfExtent`, `GoblinRotAuraIntensityAtMinRadius`, `GoblinRotAuraRateMultiplier`, `GoblinRotAuraHoldFraction`, `GoblinRotAuraWriteThresholdHours`, `GoblinRotAuraHoldCreepFactor`, `GoblinRotAuraHoldCreepFloorHours`, `GoblinRotAuraIntakeHalfLifeHours` | **New 2026-08-12 (Phase G3) — not previously in this table.** ~2s server-side sweep around the goblin: accelerates spoilage on food in nearby placed containers and (2026-08-12 extension) carried hotbar/worn-bag inventories, held just short of fully spoiled ("larder hold") rather than tipping over. Publishes an `AuraSource` via the static `GoblinRotAuraRegistry` for other consumers (crop stunting, below) to read. Intake-driven shape: reads dietsetup's rot-intake accumulator directly off `WatchedAttributes` (no assembly reference). Deployed to the live install; **not yet smoke-tested in-game.** |
 | `GoblinCropStuntBehavior.cs` | `CropBehavior.TryGrowCrop`, registered as `"RfGoblinCropStunt"` (`RFMechanicsModSystem.cs:42`, `RegisterCropBehavior`) | Gated on aura presence, not a direct trait check | `EnableGoblinRotAura`, `CropStuntMinStrength` | **New 2026-08-12 (Phase G3) — not previously in this table.** Crops under a goblin's rot aura stop advancing growth stage (recoverable, never destroyed) — gated on `GoblinRotAuraRegistry`'s spatial falloff only, never on Intensity. Deployed; **not yet smoke-tested in-game.** |
 | `GoblinRotEdiblePatch.cs` | `CollectibleObject.GetNutritionProperties` (postfix) | `GoblinTraitCode` | `EnableGoblinRotEdible`, `GoblinRotEdibleSatiety` | **New 2026-08-12 (Phase G3) — not previously in this table.** Grants `game:rot` a minimal `FoodNutritionProperties` for goblins only, so vanilla's eat pipeline (which gates solely on a non-null result) lets them eat it. Never overrides an existing non-null result. Deployed; **not yet smoke-tested in-game.** |
-| `GoblinSpitChargeGrantPatch.cs` | `CollectibleObject.tryEatStop` (postfix) | `GoblinTraitCode` | `EnableGoblinSpitCharges`, `SpitChargesPerRot`, `SpitChargeCap` | **New 2026-08-12 (Phase G3).** Grants spit charges (capped) when a goblin finishes eating `game:rot`, gated on the same completion threshold (`secondsUsed >= 0.95f`) vanilla uses. **Confirmed working in-game (2026-08-14).** |
+| `GoblinSpitChargeGrantPatch.cs` | `CollectibleObject.tryEatStop` (postfix) | `GoblinTraitCode` | `EnableGoblinSpitCharges`, `SpitChargesPerRot`, `SpitChargeCap`, `EnableGoblinRotFlies`, `GoblinRotFliesHalfLifeHours`, `GoblinRotFliesPerRot`, `GoblinRotFliesCap` | **New 2026-08-12 (Phase G3).** Grants spit charges (capped) when a goblin finishes eating `game:rot`, gated on the same completion threshold (`secondsUsed >= 0.95f`) vanilla uses. **Confirmed working in-game (2026-08-14).** **Extended 2026-08-22 (Phase G4)**: same postfix, independently-toggled `GrantRotFlies` write of `rfmechanics:rotFlies`/`rotFliesUpdatedHours`, decay-then-add, 4h half-life. |
 | `RfGoblinSpitRepairBehavior.cs` | `BlockBehavior.OnBlockInteractStart`, registered as `"RfGoblinSpitRepair"` (`RFMechanicsModSystem.cs:43`, `RegisterBlockBehaviorClass`) | `GoblinTraitCode` | `EnableGoblinSpitCharges`, `SpitRepairGain` | **New 2026-08-12 (Phase G3).** Lets a goblin spend a spit charge via empty-hand interact to repair a reparable block, mirroring vanilla's own `BehaviorReparable` repair-application math. **Confirmed working in-game (2026-08-14).** |
+| `GoblinRotFliesShared.cs` | Not a Harmony patch — plain static helper class, no registration | `GoblinTraitCode` (inline, in `GetNearbyGoblins`) | — | **New 2026-08-22 (Phase G4).** Shared between the aura and spit fly systems: `ReadLiveRotFlies` (sibling to `GoblinRotAuraBehavior.ReadLiveRotIntake`, same decay shape against the new keys) and `GetNearbyGoblins` (client-side scan, `GoblinRotFliesRange`). Deployed; **not yet confirmed in-game** (see the Phase G4 entry's verification note above). |
+| `GoblinAuraFliesModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, spawns via `RegisterAsyncParticleSpawner` | `GoblinTraitCode` (via `GoblinRotFliesShared`) | `EnableGoblinRotFlies`, `GoblinRotFliesCountMin/Max`, `GoblinRotFliesFloor`, `GoblinRotFliesSize`, `GoblinRotFliesBreathPeriod/Amplitude`, `GoblinRotFliesLagSeconds`, `GoblinRotFliesLifeSeconds`, `GoblinRotFliesRange`, plus reused `GoblinRotAuraRadiusMin/Max`/`VerticalHalfExtent` | **New 2026-08-22 (Phase G4).** Vanilla-particle ambient fly cloud around each nearby goblin. Deployed; **not yet confirmed in-game.** |
+| `GoblinSpitFliesModSystem.cs` | Not a Harmony patch — client-only `ModSystem`/`IRenderer`, auto-discovered, `OnRenderFrame` on `EnumRenderStage.AfterBlit` | `GoblinTraitCode` (via `GoblinRotFliesShared`) | `EnableGoblinSpitFlies`, `GoblinSpitFliesSize`, `GoblinSpitFliesRadius`, `GoblinSpitFliesVerticalExtent`, `GoblinSpitFliesRetargetSeconds`, `GoblinSpitFliesLagSeconds`, `GoblinSpitFliesFadeSeconds`, `SpitChargeCap` (shared) | **New 2026-08-22 (Phase G4), tuned same day.** Exact-count (== `spitCharges`) custom-renderer fly cloud, own shader/texture (`assets/rfmechanics/shaders/rfspitflies.*`, `assets/rfmechanics/textures/entity/rotflies/fly.png`). **Tuning pass (same day, second commit)**: crossed double-quad mesh (was a single quad — read as a flat cutout regardless of billboard correctness), fully camera-roll-independent billboard (was already resetting the same two rotation-column sets RiftRenderer resets, `Values[0,1,2]`/`[8,9,10]`, leaving column 1/`Values[4,5,6]` inherited from the camera matrix same as Rift itself — now also reset, since that inheritance only produced a full billboard by relying on the camera never rolling), size halved to 0.075, envelope changed from an 0.8-radius sphere centred on the chest to a body-midpoint cylinder (`GoblinSpitFliesRadius` 0.6 horizontal, `GoblinSpitFliesVerticalExtent` 0.9 vertical half-extent, renamed from `GoblinSpitFliesCloudRadius`), retarget slowed 0.3s -> 2.0s to match the aura population's pace. `/rfflieslag` restructured into four subcommands (`aura`/`size`/`radius`/`vext`). **Third pass, same day**: `GoblinSpitFliesRadius` 0.6 -> 4.5, `GoblinSpitFliesVerticalExtent` 0.9 -> 0.45, matched to More Bugs' player-carried-rot fly roam distance (see prose above). Deployed; **not yet confirmed in-game.** |
+| `OrcSmellModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, one `RegisterGameTickListener` doing detection + synchronous `SpawnParticles` emission | `OrcTraitCode` (own inline check, local player only) | `SmellEnabled`, `SmellTickIntervalMs`, `SmellRangeBase`, `SmellRangePerSize`, `SmellRangeHungerBonus`, `SmellRangeHardCap`, `SmellMaxSources`, `SmellVerticalRange` (config-key list stale beyond this pre-2026-08-24; not otherwise re-audited this pass) | **New 2026-08-23.** Player-anchored drift-particle band toward nearby fauna, direction + rough distance only, no marker ever placed on the source. See `notes/race-mechanics/orc-smell-v1-handover.md` for the full design rationale and six bugs fixed in review before any in-game test. **Extended 2026-08-24**: detection radius now gets a hunger-scaled bonus (`SmellRangeHungerBonus`, same ramp shape as `FrenzyBehavior`) and every computed radius plus `maxScan` are hard-clamped at `SmellRangeHardCap` (128 blocks, the server's own tracking cutoff — also fixes `maxScan` previously sitting 12 blocks past it). Deployed; **not yet confirmed in-game.** |
+| `OrcPuffModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, one `RegisterGameTickListener` reading `ThewBehavior.StateAttributeKey` off nearby players | — (reads the raw `rf-orc-state` byte for any `EntityPlayer`, no trait check of its own — the byte is only ever nonzero for an orc) | `EnablePuff`, `PuffIntervalGaining`, `PuffIntervalLightDebt`, `PuffIntervalHeavyDebt`, `PuffRenderRange`, `PuffParticleCount` | **New 2026-08-24.** Short fixed-size particle burst on an interval that scales with orc Thew state (idle/gaining/light debt/heavy debt) rather than a continuous emitter. State 1 (gaining) is local-player-only; states 2/3 (debt) render for every nearby player within `PuffRenderRange`. **Not yet verified in-game.** |
+| `OrcSmellClassifier.cs` | Not a Harmony patch — plain static helper, no registration | — | — | **New 2026-08-23.** `IsSmellableFauna(Entity)`: `EntityBehaviorHarvestable` present AND `creatureDiet` attribute present, both required (excludes drifters/shivers, which are harvestable but have no diet). |
 | `ElfIdentityBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfidentity.json` **both sides**, registered as `"rfelfidentity"` | `ElfTraitCode` (own `RefreshElfCache`) | `ElfIdentityTickInterval`, `EnableElfHungerDrainReduction`, `ElfHungerRateMult` | **New 2026-08-17.** Replaces `ElfAttunementBehavior` (archived same day — see `archive/elf-attunement/ARCHIVED.md`) as the sole "is this player an elf" source: one cached `IsElf` bool, refreshed immediately in `Initialize()` and every `ElfIdentityTickInterval` thereafter. No float, no thresholds, no census. Also applies/clears the reduced-hunger-drain stat (`"hungerrate"`, source `"rf-elf-attunement"`, key name unchanged) unconditionally off `IsElf`, re-derived every identity tick rather than edge-triggered — self-heals a stat left behind by the old code without a migration pass. `RFElfZoomBehavior`, `BranchyLeavesPassthroughPatch`, and `RFTreeProximityBehavior` all read `IsElf` directly. |
 | `ElfStepHeightBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfstepheight.json` **both sides**, registered as `"rfelfstepheight"` | Reads `ElfIdentityBehavior.IsElf`, no direct trait check | `EnableElfStepHeight`, `ElfStepHeightValue` (1.0), `ElfStepHeightDefaultEnabled` | **New 2026-08-17.** Sets `EntityBehaviorControlledPhysics.StepHeight` to `ElfStepHeightValue` for elves, a plain field write (public field, no Harmony patch needed). Captures the entity's actual pre-existing `StepHeight` once in `Initialize()` as the restore value (not a hardcoded vanilla 0.6f) and only writes when the current value disagrees with the target. Per-player toggle in `WatchedAttributes["rf-elf-stepheight-enabled"]`, flipped via `/rfelfstepheight toggle` (bound to a client hotkey, default Ctrl+H, 200ms debounce). 1.0 is exactly `FindSteppableCollisionBox`'s threshold, so elves auto-climb fences/stair edges — this is why the toggle exists. |
 | `RFMechanicsConfig.cs` | — | — | (all of the above, plus `DwarfTraitCode` default `"rf-dwarf-positive"`, `ElfTraitCode` default `"rf-elf-positive"`, `GoblinTraitCode` default `"rf-goblin-positive"`, `OrcTraitCode` default `"rf-orc-positive"`, and the `OrcBandTriple`/`OrcBandUpDown`/`OrcStomachStackingMode` helper types) | Shared config POCO. `_UNWIRED`-suffixed fields (`BulkyJumpHeightReduction_UNWIRED`, `StandardKnockbackTakenReduction_UNWIRED`) are reserved config surface only, not consumed by any code — see `BandBehavior.cs`'s row above. Confirmed unchanged 2026-08-13. |
@@ -271,8 +449,20 @@ Logic intact on disk, not currently reachable at runtime — moved to `src/BugRa
 | `src/BugRace/GoblinDigModifierBehavior.cs` | 2026-08-12 (Phase G3) | `RegisterBlockBehaviorClass` call commented out at `RFMechanicsModSystem.cs:47` (own comment: "Phase G3: GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race), no longer registered for goblins"). Earmarked for a future bug race, not deleted. | Goblin dig bonus on diggable-earth blocks — bare-handed or holding anything but a shovel digs at `GoblinBareHandDigRate` (default 8.0), a held shovel drops back to 1.0. `notes/race-mechanics/goblin-dig-materials-handover.md` remains the authoritative record of the material-family/gate resolution history if this is reactivated. |
 | `src/BugRace/GoblinSpitPackingPatch.cs` | 2026-08-12 (Phase G3) | `[HarmonyPatch(typeof(Block), nameof(Block.OnBlockBroken))]` commented out (`GoblinSpitPackingPatch.cs:52`) — `PatchAll` discovers patch classes purely via that attribute, so this is the exact equivalent of an unregistered behavior class. Its static `IsGoblinEarth` predicate is still called directly (not via Harmony) by `RFGoblinTunnelBehavior`, so the class isn't fully inert. | Converts every face-adjacent diggable-earth neighbor of a goblin's break to its spit-packed variant (10 mod-owned families), shovel-gated. **Downstream consequence, not independently verified this pass**: `goblin-phase-g2.2-as-built.md`'s wash-back barrel recipes (spit-packed → vanilla) have no fresh input to consume while this stays disabled — flagged in `notes/race-mechanics/README.md`. |
 
-## Diagnostic commands (server-side only, use `/`, not `.`)
+## Diagnostic commands (server-side unless noted, use `/`, not `.`)
 
+- `/rfflies` — Phase G4. Dumps `rotFlies` (raw + live-decayed), live-decayed `rotIntake`, spit
+  charges, and the resulting aura fly count/radius + spit fly count, for the calling player.
+- `/rfflieslag <aura|size|radius|vext> [value]` — Phase G4, **client-side**, not persisted. Four
+  subcommands (added in the same-day tuning pass) get/set `GoblinRotFliesLagSeconds`,
+  `GoblinSpitFliesSize`, `GoblinSpitFliesRadius`, `GoblinSpitFliesVerticalExtent` respectively,
+  live, for in-game feel tuning. Deliberately a separate command, not a `/rfflies` subcommand: a
+  client-registered command shadows a server-registered command of the same name (the client
+  resolves locally first), and these values only feed client-only renderers — putting them under
+  `/rfflies` would either never fire or would swallow `/rfflies`'s own server-side dump.
+- `/rfflycheck <playername>` — Phase G4, **client-side, temporary**. See the Phase G4 entry above
+  for what this is for; delete once the cross-client verification it exists to support has
+  actually been run.
 - `/dwarfdepth` — depth/altitude curve debug for the calling player.
 - `/rfdiag` — dumps `extraTraits`, blended `walkspeed`/`hungerrate`, explicit dwarf-trait
   `HasTrait` checks, banked climb time, saturation, and now (2026-08-04) the `ElfTraitCode`
@@ -425,6 +615,17 @@ Logic intact on disk, not currently reachable at runtime — moved to `src/BugRa
 
 ## Testing status
 
+- **Orc Thew/Band/Burn/Frenzy full rework (2026-08-24): build-verified only, NOT confirmed
+  in-game.** All 7 phases (deletions, three-zone gain/decay, Thew debt, Frenzy-on-satiety,
+  continuous rate-capped size, puff cue, hunger-scaled smell) built and deployed to the live
+  install one phase at a time, each building clean before the next started. Full detail in
+  `notes/race-mechanics/orc-thew-rework-2026-08-24-as-built.md`. Smoke-test plan (none of it
+  run yet): (1) size drift is visible and slow, no band crossing under 5 real minutes; (2) debt
+  puffs appear after a fight and clear on eating; (3) a starving orc is fast and jumps high, and
+  stops being both when Thew hits 0; (4) nothing crashes with 130 mods loaded. This entry
+  supersedes every earlier Thew/Band/Burn/Frenzy testing note below for the fields this rework
+  touched — the earlier notes remain accurate for the mechanic shapes they describe (e.g. the
+  Phase 4 flat/threshold-vs-cubic-curve finding), just not for the current config surface.
 - **Goblin Phase G2 (2026-08-06) and Phase G3 spit charges (2026-08-12): confirmed working
   in-game (2026-08-14).** Covers `GoblinClimbingPatch.cs` (raw-rock + tree climbing),
   `RFGoblinTunnelBehavior.cs` (tunnel walkspeed bonus), `ElfLeafDropPatch.cs` (leaf
