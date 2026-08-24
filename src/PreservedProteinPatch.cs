@@ -42,17 +42,8 @@ namespace rfmechanics
                 if (cfg == null || !cfg.EnableThew)
                     return;
 
-                // Load-bearing: prevents HasTrait's null-class-returns-true default from charging classless players as orcs.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null)
-                    return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null || !charSys.HasTrait(iplayer, cfg.OrcTraitCode))
+                if (!RaceTraits.HasTrait(iplayer, cfg.OrcTraitCode))
                     return;
 
                 string? itemCode = slot?.Itemstack?.Collectible?.Code?.ToString();

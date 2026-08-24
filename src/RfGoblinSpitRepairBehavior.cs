@@ -43,16 +43,7 @@ namespace rfmechanics
 
             EntityPlayer player = byPlayer.Entity;
 
-            // Load-bearing: HasTrait returns true for a null class.
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass))
-            {
-                handling = EnumHandling.PassThrough;
-                return false;
-            }
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null || !charSys.HasTrait(byPlayer, cfg.GoblinTraitCode))
+            if (!RaceTraits.HasTrait(byPlayer, cfg.GoblinTraitCode))
             {
                 handling = EnumHandling.PassThrough;
                 return false;

@@ -50,20 +50,7 @@ namespace rfmechanics
 
             EntityPlayer player = byPlayer.Entity;
 
-            // Load-bearing null check -- HasTrait returns true for a null class (discovery
-            // report Q4). Same pattern as every other rfmechanics race gate.
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass))
-            {
-                handling = EnumHandling.PassThrough;
-                return false;
-            }
-
-            // Resolved via world.Api.ModLoader, never the RFMechanicsModSystem.Api static --
-            // that static is last-writer-wins between the client/server instances in
-            // singleplayer (discovery report Q3) and unsafe for anything side-sensitive.
-            var charSys = world.Api.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null || !charSys.HasTrait(byPlayer, cfg.DwarfTraitCode))
+            if (!RaceTraits.HasTrait(byPlayer, cfg.DwarfTraitCode))
             {
                 handling = EnumHandling.PassThrough;
                 return false;

@@ -36,17 +36,8 @@ namespace rfmechanics
                 if (cfg == null || !cfg.EnableOrcWildAnimalResist)
                     return;
 
-                // No class = not this race; overrides HasTrait's null-class-returns-true default.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null)
-                    return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null || !charSys.HasTrait(iplayer, cfg.OrcTraitCode))
+                if (!RaceTraits.HasTrait(iplayer, cfg.OrcTraitCode))
                     return;
 
                 float resist = ComputeResist(__instance, cfg);

@@ -34,15 +34,8 @@ namespace rfmechanics
 
                 if (entity is not EntityPlayer player) return;
 
-                // Load-bearing: HasTrait returns true for a null class by default.
-                string charClass = player.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass)) return;
-
                 IPlayer? iplayer = player.World.PlayerByUid(player.PlayerUID);
-                if (iplayer == null) return;
-
-                var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null || !charSys.HasTrait(iplayer, cfg.OrcTraitCode)) return;
+                if (!RaceTraits.HasTrait(iplayer, cfg.OrcTraitCode)) return;
 
                 // Recorded unconditionally -- ThewBehavior's gain-zone gate reads this regardless of whether this bite repays any debt.
                 entity.Attributes.SetInt(ThewBehavior.LastFoodCategoryKey, (int)foodCat);
