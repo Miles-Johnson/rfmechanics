@@ -1019,12 +1019,13 @@ public class RFMechanicsConfig
     /// own detection radius).</summary>
     public int SmellParticlesNear { get; set; } = 16;
 
-    /// <summary>Particle count basis at scent strength 0 (source near its own detection edge). A
-    /// floor, not a target -- below this the jet stops reading as a line and starts reading as
-    /// noise. Deliberately sparse at range even though the old v1 finding said distance should
-    /// never cost signal strength: that finding was about a wide arc reading as noise when
-    /// thinly populated, but a narrow jet reads as a line even at this count.</summary>
-    public int SmellParticlesFar { get; set; } = 3;
+    /// <summary>Flat particle count at scent strength 0 (source at its own detection edge) --
+    /// added on top of growth rather than scaled by size or spread, so every source shows
+    /// exactly this many particles at max range regardless of how big it is. Also reserved per
+    /// source in OnGameTick's shared budget so a nearby source can't starve a distant one below
+    /// this floor. Deliberately sparse: below this the jet stops reading as a line and starts
+    /// reading as noise, but a narrow jet reads as a line even at this count.</summary>
+    public int SmellParticlesFar { get; set; } = 2;
 
     /// <summary>Exponent shaping how scent strength maps to particle count between
     /// SmellParticlesFar and SmellParticlesNear.</summary>

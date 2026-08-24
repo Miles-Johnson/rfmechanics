@@ -115,11 +115,19 @@ namespace rfmechanics
 
                 int totalSpawned = 0;
                 double observedMaxDist = 0;
-                foreach (SmellSource src in sources)
+                for (int i = 0; i < sources.Count; i++)
                 {
+                    SmellSource src = sources[i];
                     if (totalSpawned >= cfg.SmellMaxParticles) break;
                     observedMaxDist = Math.Max(observedMaxDist, src.HorDist);
-                    totalSpawned += EmitJet(cfg, eye, src, cfg.SmellMaxParticles - totalSpawned, fadeT, self.Pos.Motion);
+
+                    // Sources are strength-sorted (closest first), so a naive shared budget
+                    // starves the farthest source's floor once nearby jets fill it. Reserve each
+                    // not-yet-processed source's floor before handing out the rest -- safe as long
+                    // as SmellMaxParticles >= SmellParticlesFar * SmellMaxSources.
+                    int reserveForRest = (sources.Count - i - 1) * cfg.SmellParticlesFar;
+                    int budgetForThis = Math.Max(0, cfg.SmellMaxParticles - totalSpawned - reserveForRest);
+                    totalSpawned += EmitJet(cfg, eye, src, budgetForThis, fadeT, self.Pos.Motion);
                 }
 
                 long nowMs = capi.World.ElapsedMilliseconds;
@@ -263,18 +271,18 @@ namespace rfmechanics
             // fact about the animal) -- a bear and a chicken at 30 blocks share an arc width but
             // not a density.
             double falloff = Math.Pow(src.Strength, cfg.SmellFalloffExponent);
-            // SmellParticlesFar is a floor, not a target -- deliberately sparse at range, the
-            // opposite of the v1 finding that distance shouldn't cost signal strength. That
-            // finding was about a wide arc smearing a low count into noise; a narrow jet stays
-            // legible even this sparse.
-            double countBase = GameMath.Lerp(cfg.SmellParticlesFar, cfg.SmellParticlesNear, falloff);
             // Same base+per-size clamp shape as the particle-size scaling above, but applied to
             // count instead -- so a chicken's jet reads sparser than a bear's at every distance,
             // not just up close.
             double countSizeFactor = GameMath.Clamp(
                 cfg.SmellParticleCountFactorBase + cfg.SmellParticleCountFactorPerSize * src.Size,
                 cfg.SmellParticleCountFactorMin, cfg.SmellParticleCountFactorMax);
-            double density = countBase * (spreadDeg / cfg.SmellSpreadFarDeg) * countSizeFactor;
+            // SmellParticlesFar is added on top of growth, not blended into it, so every source
+            // reads as exactly that many particles at its own max range regardless of size or
+            // spread width -- size/spread/distance shaping only applies to growth above the floor.
+            double growth = (cfg.SmellParticlesNear - cfg.SmellParticlesFar) * falloff
+                * (spreadDeg / cfg.SmellSpreadFarDeg) * countSizeFactor;
+            double density = cfg.SmellParticlesFar + growth;
             int count = (int)Math.Round(Math.Min(density, cfg.SmellMaxParticlesPerSource));
             count = Math.Min(count, remainingBudget);
 
