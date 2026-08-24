@@ -1,7 +1,6 @@
 using System;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
-using Vintagestory.GameContent;
 
 namespace rfmechanics
 {
@@ -47,16 +46,7 @@ namespace rfmechanics
                 if (player?.Entity == null)
                     return;
 
-                // No class = not a goblin; overrides HasTrait's null-class-returns-true default.
-                string charClass = player.Entity.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass))
-                    return;
-
-                var charSys = capi.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null)
-                    return;
-
-                if (!charSys.HasTrait(player, cfg.GoblinTraitCode))
+                if (!RaceTraits.HasTrait(player, cfg.GoblinTraitCode))
                     return;
 
                 capi.Render.ShaderUniforms.NightVisionStrength =

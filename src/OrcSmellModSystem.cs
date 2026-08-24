@@ -99,14 +99,7 @@ namespace rfmechanics
                 EntityPlayer? self = capi.World.Player?.Entity;
                 if (self == null) return;
 
-                // Load-bearing: HasTrait returns true for a null class (verified against
-                // CharacterSystem.HasTrait, decompiled 1.22).
-                string charClass = self.WatchedAttributes.GetString("characterClass");
-                if (string.IsNullOrEmpty(charClass)) return;
-
-                var charSys = capi.ModLoader.GetModSystem<CharacterSystem>();
-                if (charSys == null) return;
-                if (!charSys.HasTrait(capi.World.Player, cfg.OrcTraitCode)) return;
+                if (!RaceTraits.HasTrait(capi.World.Player, cfg.OrcTraitCode)) return;
 
                 Vec3d eye = self.Pos.XYZ;
                 eye.Y += self.LocalEyePos.Y;

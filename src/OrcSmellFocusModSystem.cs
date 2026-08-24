@@ -2,7 +2,6 @@ using System;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
-using Vintagestory.GameContent;
 
 namespace rfmechanics
 {
@@ -55,17 +54,9 @@ namespace rfmechanics
                     IPlayer? player = capi.World.Player;
                     if (player?.Entity != null)
                     {
-                        // Load-bearing: HasTrait returns true for a null class (verified against
-                        // CharacterSystem.HasTrait, decompiled 1.22) -- the explicit class-string
-                        // check below overrides that permissive default for the focus gate.
-                        string charClass = player.Entity.WatchedAttributes.GetString("characterClass");
-                        if (!string.IsNullOrEmpty(charClass))
+                        if (RaceTraits.HasTrait(player, cfg.OrcTraitCode))
                         {
-                            var charSys = capi.ModLoader.GetModSystem<CharacterSystem>();
-                            if (charSys != null && charSys.HasTrait(player, cfg.OrcTraitCode))
-                            {
-                                eligible = true;
-                            }
+                            eligible = true;
                         }
                     }
                 }
