@@ -846,6 +846,206 @@ public class RFMechanicsConfig
     /// <summary>Neighbour sample radius, in map chunks, for /rfscar around and /rfscar bench.
     /// Radius 1 = the 3x3 grid centered on the calling player's map chunk.</summary>
     public int ChunkScarNeighborSampleRadius { get; set; } = 1;
+
+    // ── Orc Smell ──
+
+    /// <summary>Master toggle for the Orc Smell mechanic. Client-side only, no server authority.</summary>
+    public bool SmellEnabled { get; set; } = true;
+
+    /// <summary>Tick cadence, in milliseconds, for the detection scan and jet emission.</summary>
+    public int SmellTickIntervalMs { get; set; } = 500;
+
+    /// <summary>Base detection radius in blocks, at collision_w == 0. Lowered 80 -> 60
+    /// (2026-08-23) so total range reads as size-driven (SmellRangePerSize dominant) rather than
+    /// a flat tracker with a minor size adjustment.</summary>
+    public double SmellRangeBase { get; set; } = 60;
+
+    /// <summary>Additional detection radius in blocks per unit of collision_w.</summary>
+    public double SmellRangePerSize { get; set; } = 40;
+
+    /// <summary>Additional detection radius in blocks at the peak of the hunger ramp (satFrac 0
+    /// via FrenzySatietyGate/FrenzyCurveExponent's shape, same curve as Frenzy's own ramp) --
+    /// zero at satFrac FrenzySatietyGate, full here at satFrac 0. Added on top of the base+size
+    /// radius before the hard cap below.</summary>
+    public double SmellRangeHungerBonus { get; set; } = 48.0;
+
+    /// <summary>Hard ceiling, in blocks, on every computed smell radius and the scan's maxScan --
+    /// the server stops tracking/syncing entities past this distance (see facts doc Section B),
+    /// so anything a larger radius would reach is dead range regardless.</summary>
+    public double SmellRangeHardCap { get; set; } = 128.0;
+
+    /// <summary>Vertical half-range for the entity scan (GetEntitiesAround's vertRange). Sized
+    /// for an 80-160 block horizontal scan -- the old 12-block value was sized for a 30-block
+    /// scan and would hide most distant animals behind ordinary terrain relief.</summary>
+    public double SmellVerticalRange { get; set; } = 40;
+
+    /// <summary>Jet angular width in degrees at SmellSpreadFarDist (the far pin).</summary>
+    public double SmellSpreadFarDeg { get; set; } = 6;
+
+    /// <summary>Jet angular width in degrees at SmellBlowoutStart, where the far curve and the
+    /// blowout curve meet. Anchoring both curves to this one value is load-bearing -- anchoring
+    /// the far curve to a different distance puts a visible step in jet width at that range.</summary>
+    public double SmellSpreadMidDeg { get; set; } = 20;
+
+    /// <summary>Jet angular width in degrees once fully blown out (SmellBlowoutEnd and closer) --
+    /// the cloud the jet fans into. 300 leaves only a 60-degree dead arc behind the player;
+    /// smaller values leave enough of a gap to still read as a bearing, which defeats the point
+    /// of the blowout.</summary>
+    public double SmellSpreadNearDeg { get; set; } = 300;
+
+    /// <summary>Distance in blocks at which the jet is at its narrowest (SmellSpreadFarDeg).</summary>
+    public double SmellSpreadFarDist { get; set; } = 120;
+
+    /// <summary>Distance in blocks where the fast blowout collapse begins (still SmellSpreadMidDeg
+    /// wide here).</summary>
+    public double SmellBlowoutStart { get; set; } = 20;
+
+    /// <summary>Distance in blocks where the blowout collapse completes (full SmellSpreadNearDeg
+    /// cloud). The 20-to-15 gap is the only distance cue in the mechanic -- crossing it is meant
+    /// to read as "the animal is close, use your eyes now."</summary>
+    public double SmellBlowoutEnd { get; set; } = 15;
+
+    /// <summary>Jet length in blocks before the blowout. Length depends only on the blowout
+    /// curve, never on distance to the source -- a jet that reaches toward the animal is a
+    /// rangefinder, not a bearing indicator.</summary>
+    public double SmellJetLengthFar { get; set; } = 25;
+
+    /// <summary>Jet length in blocks once fully blown out into a cloud.</summary>
+    public double SmellJetLengthNear { get; set; } = 6;
+
+    /// <summary>Dead-zone radius in blocks at the player's face -- both the nearest a particle
+    /// can spawn and its designed fade-out target (a particle's lifetime is capped to the
+    /// travel time from its spawn point to this radius, so opacity reaches zero right as it
+    /// arrives). Raised 1.5 -> 3.0 (2026-08-23) after particles were observed visibly passing
+    /// through the player, then 3.0 -> 3.5 (same day) as a belt-and-suspenders margin once the
+    /// actual root cause was fixed: EmitJet's particle velocity now includes the player's own
+    /// motion (see OrcSmellModSystem.EmitJet), so a moving player no longer invalidates the
+    /// spawn-time trajectory this radius assumes.</summary>
+    public double SmellJetInnerRadius { get; set; } = 3.5;
+
+    /// <summary>Jet cross-section thickness in degrees per unit of collision_w.</summary>
+    public double SmellThicknessDegPerSize { get; set; } = 8;
+
+    /// <summary>Particle quad size in blocks at collision_w == 0 -- a hypothetical extrapolation
+    /// point, not a real creature (chicken, the smallest vanilla land fauna, is 0.5). Negative
+    /// by design: solved together with SmellParticleSizePerSize so the formula lands exactly on
+    /// SmellParticleSizeMin at collision_w 0.5 (chicken) and SmellParticleSizeMax at 1.6 (bear,
+    /// polar male, the largest vanilla land fauna) -- chicken is the intended visual floor, not
+    /// an arbitrary clamp catching sizes that never occur. TUNING: not locked.</summary>
+    public double SmellParticleSizeBase { get; set; } = -0.05;
+
+    /// <summary>Additional particle quad size in blocks per unit of collision_w -- a bear's
+    /// scent jet reads as visibly coarser than a chicken's, same idea as
+    /// SmellThicknessDegPerSize but for the individual particle instead of the jet's spread.
+    /// See SmellParticleSizeBase for how this and the Min/Max clamps were solved together.
+    /// TUNING: not locked.</summary>
+    public double SmellParticleSizePerSize { get; set; } = 0.22;
+
+    /// <summary>Clamp floor on the size-scaled particle quad -- lands exactly at chicken's
+    /// collision_w (0.5), the smallest vanilla land fauna, so chicken is the visual floor by
+    /// construction, not an arbitrary illegible-speck guard.</summary>
+    public double SmellParticleSizeMin { get; set; } = 0.06;
+
+    /// <summary>Clamp ceiling on the size-scaled particle quad -- lands exactly at bear polar
+    /// male's collision_w (1.6), the largest vanilla land fauna, so nothing vanilla ever
+    /// actually clamps here; it exists for modded megafauna bigger than any vanilla creature.</summary>
+    public double SmellParticleSizeMax { get; set; } = 0.30;
+
+    /// <summary>Particle count multiplier at collision_w == 0, same base+per-size convention as
+    /// SmellParticleSizeBase -- applied on top of the distance-based falloff so small prey read
+    /// sparser than large prey at every distance, not just up close. TUNING: not locked.</summary>
+    public double SmellParticleCountFactorBase { get; set; } = 0.5;
+
+    /// <summary>Additional particle count multiplier per unit of collision_w. TUNING: not
+    /// locked.</summary>
+    public double SmellParticleCountFactorPerSize { get; set; } = 0.4;
+
+    /// <summary>Clamp floor on the size-scaled particle count multiplier.</summary>
+    public double SmellParticleCountFactorMin { get; set; } = 0.3;
+
+    /// <summary>Clamp ceiling on the size-scaled particle count multiplier.</summary>
+    public double SmellParticleCountFactorMax { get; set; } = 1.6;
+
+    /// <summary>Particle count basis at scent strength 1 (source near the player relative to its
+    /// own detection radius).</summary>
+    public int SmellParticlesNear { get; set; } = 16;
+
+    /// <summary>Particle count basis at scent strength 0 (source near its own detection edge). A
+    /// floor, not a target -- below this the jet stops reading as a line and starts reading as
+    /// noise. Deliberately sparse at range even though the old v1 finding said distance should
+    /// never cost signal strength: that finding was about a wide arc reading as noise when
+    /// thinly populated, but a narrow jet reads as a line even at this count.</summary>
+    public int SmellParticlesFar { get; set; } = 3;
+
+    /// <summary>Exponent shaping how scent strength maps to particle count between
+    /// SmellParticlesFar and SmellParticlesNear.</summary>
+    public double SmellFalloffExponent { get; set; } = 1.0;
+
+    /// <summary>Hard cap on particles spawned for a single source in one tick, applied after
+    /// spread-density scaling.</summary>
+    public int SmellMaxParticlesPerSource { get; set; } = 90;
+
+    /// <summary>Hard cap on particles spawned across all sources combined in one tick.</summary>
+    public int SmellMaxParticles { get; set; } = 400;
+
+    /// <summary>Max sources emitted per tick. A frame-budget cap, not a legibility choice --
+    /// six-plus overlapping jets is intended, not a bug.</summary>
+    public int SmellMaxSources { get; set; } = 6;
+
+    /// <summary>Inward drift speed in blocks/sec, toward the player's horizontal position.</summary>
+    public double SmellDriftSpeed { get; set; } = 4.0;
+
+    /// <summary>Particle lifetime in seconds.</summary>
+    public double SmellParticleLifeSec { get; set; } = 1.2;
+
+    /// <summary>If true, jets emit continuously without holding the focus hotkey.</summary>
+    public bool SmellPassiveEnabled { get; set; } = false;
+
+    /// <summary>Milliseconds for the focus fog weight to ramp in on hotkey press. Deliberately
+    /// slow (5s) -- the darkening is meant to read as a gradual sensory shift, not an instant
+    /// toggle.</summary>
+    public int SmellFocusEngageMs { get; set; } = 5000;
+
+    /// <summary>Milliseconds for the focus fog weight to ramp back out on hotkey release.</summary>
+    public int SmellFocusReleaseMs { get; set; } = 200;
+
+    /// <summary>Fog density value applied at full focus weight.</summary>
+    public double SmellFocusFogDensity { get; set; } = 0.25;
+
+    /// <summary>Milliseconds the hotkey must be continuously held before smell particles start
+    /// appearing at all. Keyed off hold duration (OrcSmellShared.HeldMs), independent of the
+    /// fog ramp -- the world darkens first, the smell sense kicks in after.</summary>
+    public int SmellParticleFadeInStartMs { get; set; } = 3000;
+
+    /// <summary>Milliseconds held at which smell particles reach full opacity.</summary>
+    public int SmellParticleFadeInFullMs { get; set; } = 6000;
+
+    /// <summary>Jet RGB for sources classified Predator (CreatureDiet includes Protein, no plant categories).</summary>
+    public int[] SmellColorPredator { get; set; } = new[] { 229, 57, 53 };
+
+    /// <summary>Jet RGB for sources classified Herbivore (CreatureDiet has Fruit/Vegetable/Grain, no Protein).</summary>
+    public int[] SmellColorHerbivore { get; set; } = new[] { 102, 187, 106 };
+
+    /// <summary>Jet RGB for sources classified Omnivore (CreatureDiet has both Protein and a plant category).</summary>
+    public int[] SmellColorOmnivore { get; set; } = new[] { 255, 179, 0 };
+
+    /// <summary>Jet RGB fallback when diet doesn't cleanly classify. Matches the mechanic's original single color.</summary>
+    public int[] SmellColorUnknown { get; set; } = new[] { 190, 225, 130 };
+
+    /// <summary>Master toggle for tag-based predator detection. False falls back to
+    /// diet-only classification (the pre-existing behavior) if tags misbehave in-game.</summary>
+    public bool SmellUseEntityTags { get; set; } = true;
+
+    /// <summary>Entity tags that mark a creature Predator regardless of diet (ANY match --
+    /// modders apply predator/ferocious by feel, not a fixed schema, so real creatures have
+    /// one without the other). New fauna mods may need new entries here without a rebuild.</summary>
+    public string[] SmellPredatorTags { get; set; } = new[] { "predator", "ferocious" };
+
+    /// <summary>Entity codes (domain:path) forced to Predator regardless of tags or diet --
+    /// escape hatch for dangerous creatures that are untagged and whose diet reads as
+    /// harmless (e.g. an aggressive omnivore boss mob that would otherwise classify
+    /// identically to a farm animal).</summary>
+    public string[] SmellForcePredatorCodes { get; set; } = new[] { "feverstonewilds:hellboar" };
 }
 
 /// <summary>How OrcStomachMultiplier combines with racialability's own maxSaturationFactor
