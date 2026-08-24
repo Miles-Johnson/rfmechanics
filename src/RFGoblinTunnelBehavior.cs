@@ -61,16 +61,8 @@ namespace rfmechanics
             if (cfg == null) return false;
             if (entity is not EntityPlayer player) return false;
 
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass)) return false;
-
             IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) return false;
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null) return false;
-
-            return charSys.HasTrait(iplayer, cfg.GoblinTraitCode);
+            return RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode);
         }
 
         private void UpdateHysteresis()

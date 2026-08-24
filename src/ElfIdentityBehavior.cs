@@ -64,28 +64,14 @@ namespace rfmechanics
             entity.Stats.Set("hungerrate", HungerDrainStatSource, (float)cfg.ElfHungerRateMult - 1f);
         }
 
-        /// <summary>
-        /// Guard chain matching every other rfmechanics elf gate (copied from
-        /// ElfAttunementBehavior.RefreshElfCache): EntityPlayer check, then characterClass null
-        /// check (load-bearing -- HasTrait returns true for a null class by default), then the
-        /// trait check itself.
-        /// </summary>
         private void RefreshElfCache()
         {
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null) { IsElf = false; return; }
             if (entity is not EntityPlayer player) { IsElf = false; return; }
 
-            string charClass = player.WatchedAttributes.GetString("characterClass");
-            if (string.IsNullOrEmpty(charClass)) { IsElf = false; return; }
-
             IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) { IsElf = false; return; }
-
-            var charSys = RFMechanicsModSystem.Api?.ModLoader.GetModSystem<CharacterSystem>();
-            if (charSys == null) { IsElf = false; return; }
-
-            IsElf = charSys.HasTrait(iplayer, cfg.ElfTraitCode);
+            IsElf = RaceTraits.HasTrait(iplayer, cfg.ElfTraitCode);
         }
     }
 }
