@@ -254,15 +254,6 @@ public class RFMechanicsConfig
     /// several hours of Lean.</summary>
     public double ThewCreationFloor { get; set; } = 0.4;
 
-    /// <summary>Full item codes that count as "preserved protein" for orc, filling ProteinLevel
-    /// at PreservedProteinMultiplier instead of the full rate. Default (cured redmeat/bushmeat)
-    /// is unreachable in normal survival play -- this is a server-config surface for modded preserved foods, not vestigial.</summary>
-    public string[] PreservedProteinItemCodes { get; set; } = new[] { "survival:redmeat-cured", "survival:bushmeat-cured" };
-
-    /// <summary>Multiplier applied to ProteinLevel gain (via nutritionGainMultiplier) for
-    /// preserved-protein items. 0.5 = half the protein fill rate of an equivalent fresh item.</summary>
-    public double PreservedProteinMultiplier { get; set; } = 0.5;
-
     // ── Thew Debt (Orc) ──
 
     /// <summary>Per-in-game-hour Thew moved from ThewBehavior's own tick into paying down
