@@ -337,6 +337,14 @@ public class RFMechanicsConfig
     /// real minutes) to fully close.</summary>
     public double SizeChangeRatePerSecond { get; set; } = 0.0007;
 
+    /// <summary>Grid step entitySize is quantized to before writing to WatchedAttributes -- each
+    /// write triggers a client mesh rebuild via PlayerModelLib (MarkShapeModified) plus an eye-height
+    /// recompute, so writing on every tick (as the raw rate cap would) causes visible model
+    /// twitching. The rebuild is the visible cost, not the size delta, so bias this upward: tune up
+    /// until a size step becomes visible, then back off one step. Default 0.01 -> ~22 writes across
+    /// a full Lean-Standard glide (0.22 / 0.01).</summary>
+    public double EntitySizeWriteThreshold { get; set; } = 0.01;
+
     /// <summary>Per-band hungerrate multiplier, applied as a Stats.Set delta (target - 1) under
     /// source "rf-orc-band" on the vanilla "hungerrate" category. Lean unmodified (1.0),
     /// Standard 1.3x, Bulky 1.8x.</summary>
@@ -696,7 +704,7 @@ public class RFMechanicsConfig
     public double CropStuntMinStrength { get; set; } = 0.15;
 
     /// <summary>Decay half-life (in-game calendar hours) used to decay dietsetup's rot-intake
-    /// accumulator live on read. MUST match dietsetup's own RotIntakeHalfLifeHours
+    /// accumulator live on read. MUST match dietsetup's own IntakeHalfLifeHours["rot"]
     /// (DietSetupConfig.cs) -- a documented cross-reference, not independently tunable, since
     /// rfmechanics has no assembly reference to dietsetup to read the value directly.</summary>
     public double GoblinRotAuraIntakeHalfLifeHours { get; set; } = 48.0;

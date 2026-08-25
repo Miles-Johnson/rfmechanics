@@ -527,8 +527,8 @@ namespace rfmechanics
                     Entity entity = player.Entity;
                     var wa = entity.WatchedAttributes;
                     double nowHours = entity.World.Calendar.TotalHours;
-                    double lastHours = wa.GetDouble("dietsetup:rotIntakeUpdatedHours", nowHours);
-                    double raw = wa.GetDouble("dietsetup:rotIntake", 0.0);
+                    double lastHours = wa.GetDouble("dietsetup:intake:rot:updatedHours", nowHours);
+                    double raw = wa.GetDouble("dietsetup:intake:rot", 0.0);
                     double elapsedHours = Math.Max(0.0, nowHours - lastHours);
 
                     float t = GoblinRotAuraBehavior.ReadLiveRotIntake(entity, cfg);

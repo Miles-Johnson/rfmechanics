@@ -37,14 +37,14 @@ namespace rfmechanics
                         return TextCommandResult.Success($"Found player '{targetName}' but this client has no Entity for them (not loaded/tracked?).");
 
                     string charClass = entity.WatchedAttributes.GetString("characterClass", null);
-                    bool hasRotIntake = entity.WatchedAttributes.HasAttribute("dietsetup:rotIntake");
-                    double rotIntake = entity.WatchedAttributes.GetDouble("dietsetup:rotIntake", -1);
+                    bool hasRotIntake = entity.WatchedAttributes.HasAttribute("dietsetup:intake:rot");
+                    double rotIntake = entity.WatchedAttributes.GetDouble("dietsetup:intake:rot", -1);
                     bool hasSpitCharges = entity.WatchedAttributes.HasAttribute("rfmechanics:spitCharges");
                     int spitCharges = entity.WatchedAttributes.GetInt("rfmechanics:spitCharges", -1);
 
                     return TextCommandResult.Success(
                         $"characterClass={(charClass ?? "<null/default>")} | " +
-                        $"dietsetup:rotIntake present={hasRotIntake} value={rotIntake} | " +
+                        $"dietsetup:intake:rot present={hasRotIntake} value={rotIntake} | " +
                         $"rfmechanics:spitCharges present={hasSpitCharges} value={spitCharges}");
                 });
         }

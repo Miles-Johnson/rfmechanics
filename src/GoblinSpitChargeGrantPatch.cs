@@ -73,7 +73,7 @@ namespace rfmechanics
         /// Decay-then-add, same shape as dietsetup's RotIntakeAccrual but a deliberately separate
         /// signal: rotIntake accrues from any imperfectly fresh food and sits near 0.5 in steady
         /// state, so it can't express "this goblin has eaten no rot." This keys on literal
-        /// game:rot only (already enforced by the caller) and never reads dietsetup:rotIntake.
+        /// game:rot only (already enforced by the caller) and never reads dietsetup:intake:rot.
         /// </summary>
         private static void GrantRotFlies(EntityPlayer player, RFMechanicsConfig cfg)
         {

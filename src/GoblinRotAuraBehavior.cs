@@ -77,18 +77,18 @@ namespace rfmechanics
         }
 
         /// <summary>
-        /// Cross-mod contract: reads dietsetup's "dietsetup:rotIntake" /
-        /// "dietsetup:rotIntakeUpdatedHours" WatchedAttributes keys directly, no assembly
+        /// Cross-mod contract: reads dietsetup's "dietsetup:intake:rot" /
+        /// "dietsetup:intake:rot:updatedHours" WatchedAttributes keys directly, no assembly
         /// reference to dietsetup. Decays live using the same exponential half-life formula
         /// dietsetup uses on write -- GoblinRotAuraIntakeHalfLifeHours must be kept in sync with
-        /// dietsetup's own RotIntakeHalfLifeHours.
+        /// dietsetup's own IntakeHalfLifeHours["rot"].
         /// </summary>
         internal static float ReadLiveRotIntake(Entity entity, RFMechanicsConfig cfg)
         {
             var wa = entity.WatchedAttributes;
             double nowHours = entity.World.Calendar.TotalHours;
-            double lastHours = wa.GetDouble("dietsetup:rotIntakeUpdatedHours", nowHours);
-            double raw = wa.GetDouble("dietsetup:rotIntake", 0.0);
+            double lastHours = wa.GetDouble("dietsetup:intake:rot:updatedHours", nowHours);
+            double raw = wa.GetDouble("dietsetup:intake:rot", 0.0);
             double elapsed = Math.Max(0.0, nowHours - lastHours);
             return (float)(raw * Math.Pow(0.5, elapsed / cfg.GoblinRotAuraIntakeHalfLifeHours));
         }

@@ -10,7 +10,7 @@ namespace rfmechanics
     /// <summary>
     /// Vanilla-particle aura fly population (Phase G4 Step 3): a density-weighted cloud around
     /// each nearby goblin. Count is driven by rfmechanics:rotFlies; radius/shape is read live from
-    /// dietsetup:rotIntake through GoblinRotAuraBehavior.ComputeShape, so the visible cloud always
+    /// dietsetup:intake:rot through GoblinRotAuraBehavior.ComputeShape, so the visible cloud always
     /// matches the invisible spoilage-acceleration field's own footprint.
     /// Follows ModSystemAmbientParticles: one SimpleParticleProperties template, spawned through
     /// the async particle manager so this never costs main-render-thread time.
