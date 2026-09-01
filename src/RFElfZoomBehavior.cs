@@ -6,15 +6,15 @@ using Vintagestory.API.Common.Entities;
 namespace rfmechanics
 {
     /// <summary>
-    /// Telescopic vision: holding right-click with an empty hand eases the FOV down to
+    /// Telescopic vision: holding the "rfelfzoom" hotkey (default V) eases the FOV down to
     /// ElfZoomFovMult; releasing eases it back to 1.0. No attunement gate -- every elf has this
     /// at all times, gated only by ElfIdentityBehavior.IsElf.
     ///
     /// Recomputes the zoom target every tick from live conditions rather than latching a
-    /// press/release flag, so it structurally cannot get stuck -- release, item pickup, opening
-    /// a GUI, and death all fall out of the same recompute for free (see EvaluateWantsZoom).
-    /// Teleport is deliberately not special-cased: a teleport while right-click is held just
-    /// leaves the view zoomed, and release clears it next tick like any other release.
+    /// press/release flag, so it structurally cannot get stuck -- release, opening a GUI, and
+    /// death all fall out of the same recompute for free (see EvaluateWantsZoom). Teleport is
+    /// deliberately not special-cased: a teleport while the key is held just leaves the view
+    /// zoomed, and release clears it next tick like any other release.
     ///
     /// Attached to /client/behaviors/- ONLY (deviates from seraph-elfidentity.json's dual-side
     /// attach) -- nothing server-side ever calls GetBehavior&lt;RFElfZoomBehavior&gt;(), FOV/camera
@@ -23,7 +23,9 @@ namespace rfmechanics
     /// LOCAL PLAYER ONLY: attached to every humanoid player entity, including remote players'
     /// client-side representations -- EntityControls is synced per-entity so their held-item
     /// animations render correctly. Without the clientWorld.Player.Entity==entity guard, a
-    /// nearby player's right-click would drive this client's own static FOV state.
+    /// nearby player's own key state would drive this client's own static FOV state (raw
+    /// keyboard state is read from this client's Input, not per-entity, so the guard is what
+    /// keeps a remote player's copy of this behavior from also reacting to it).
     /// </summary>
     public class RFElfZoomBehavior : EntityBehavior
     {
@@ -33,7 +35,7 @@ namespace rfmechanics
         public static float CurrentFovMult => currentFovMult;
 
         private float targetFovMult = 1f;
-        private float rightMouseHeldMs;
+        private float zoomKeyHeldMs;
 
         public RFElfZoomBehavior(Entity entity) : base(entity) { }
 
@@ -54,46 +56,37 @@ namespace rfmechanics
             StepTowardTarget(deltaTime, transitionMs);
         }
 
-        /// <summary>Reused guard idiom from RfDwarfOreSongBehavior/RfGoblinSpitRepairBehavior
-        /// (empty-hand check), composed with the vanilla flags that actually decide a click is
-        /// already claimed: HandUse != None is set the instant any block's OnBlockInteractStart
-        /// returns true (containers included, generically -- SystemMouseInWorldInteractions.cs
-        /// TryBeginUseBlock -- not just the block types those two examples touch), and
-        /// CurrentEntitySelection != null covers mounting, which bypasses HandUse entirely
-        /// (EntityBehaviorSeatable.OnInteract, dispatched directly from
-        /// HandleMouseInteractionsNoBlockSelected whenever nothing is block-selected).
-        /// ElfZoomEngageDelayMs additionally absorbs the RightMouseDown/HandUse tick-vs-render
-        /// scheduling race: RightMouseDown updates on a fixed 20ms tick while HandUse is set from
-        /// render-stage interaction dispatch, so a container click can transiently read as
-        /// RightMouseDown=true, HandUse=None for a single tick.
+        /// <summary>Held-key check, same polling shape as OrcSmellFocusModSystem.OnRenderFrame:
+        /// reads the resolved key's raw hardware state each tick rather than latching a
+        /// press/release event, so it respects live rebinding for free. ElfZoomEngageDelayMs is
+        /// kept as a short hold-to-engage delay (no longer absorbing a tick/render scheduling
+        /// race -- that only applied to the old RightMouseDown/HandUse trigger -- just a
+        /// deliberate small debounce against a stray tap).
         ///
-        /// Does not read Controls while mounted -- SystemPlayerControl routes mouse state into
-        /// MountedOn.Controls in that case, not the player's own Controls, so zoom simply never
-        /// engages on horseback rather than reading stale state. Not addressed here: out of scope.</summary>
+        /// Does not read Controls while mounted, unlike the old RightMouseDown check would have
+        /// -- Input.KeyboardKeyStateRaw is independent of SystemPlayerControl's mount routing, so
+        /// zoom now works on horseback too.</summary>
         private bool EvaluateWantsZoom(RFMechanicsConfig cfg, float deltaTime)
         {
-            if (!entity.Alive) { rightMouseHeldMs = 0f; return false; }
+            if (!entity.Alive) { zoomKeyHeldMs = 0f; return false; }
+            if (entity.Api is not ICoreClientAPI capi) return false;
 
-            EntityPlayer player = (EntityPlayer)entity;
-            if (!player.Controls.RightMouseDown)
+            bool held = capi.Input.HotKeys.TryGetValue("rfelfzoom", out HotKey hotkey)
+                && capi.Input.KeyboardKeyStateRaw[(int)hotkey.CurrentMapping.KeyCode];
+
+            if (!held)
             {
-                rightMouseHeldMs = 0f;
+                zoomKeyHeldMs = 0f;
                 return false;
             }
-            rightMouseHeldMs += deltaTime * 1000f;
-
-            IPlayer iplayer = entity.World.PlayerByUid(player.PlayerUID);
-            if (iplayer == null) return false;
-            if (!iplayer.InventoryManager.ActiveHotbarSlot.Empty) return false;
-            if (player.Controls.HandUse != EnumHandInteract.None) return false;
-            if (iplayer.CurrentEntitySelection != null) return false;
+            zoomKeyHeldMs += deltaTime * 1000f;
 
             var identity = entity.GetBehavior<ElfIdentityBehavior>();
             if (identity == null || !identity.IsElf) return false;
 
-            if (entity.Api is ICoreClientAPI capi && !capi.Input.MouseGrabbed) return false;
+            if (!capi.Input.MouseGrabbed) return false;
 
-            return rightMouseHeldMs >= cfg.ElfZoomEngageDelayMs;
+            return zoomKeyHeldMs >= cfg.ElfZoomEngageDelayMs;
         }
 
         /// <summary>Linear step-toward, same shape as ElfAttunementBehavior.StepToward -- rate
@@ -115,7 +108,7 @@ namespace rfmechanics
         {
             targetFovMult = 1f;
             currentFovMult = 1f;
-            rightMouseHeldMs = 0f;
+            zoomKeyHeldMs = 0f;
         }
 
         /// <summary>Called from RFMechanicsModSystem.Dispose() on client teardown.

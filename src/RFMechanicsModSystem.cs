@@ -42,9 +42,6 @@ namespace rfmechanics
             api.RegisterEntityBehaviorClass("rfgoblintunnel", typeof(RFGoblinTunnelBehavior));
             api.RegisterEntityBehaviorClass("rfgoblinrotaura", typeof(GoblinRotAuraBehavior));
             api.RegisterCropBehavior("RfGoblinCropStunt", typeof(GoblinCropStuntBehavior));
-            api.RegisterBlockBehaviorClass("RfGoblinSpitRepair", typeof(RfGoblinSpitRepairBehavior));
-            api.RegisterBlockBehaviorClass("RfDwarfOreSong", typeof(RfDwarfOreSongBehavior));
-
             // GoblinDigModifierBehavior re-homed to src/BugRace/ (future bug race), disabled -- see its class header.
             // api.RegisterBlockBehaviorClass("GoblinDigModifier", typeof(rfmechanics.BugRace.GoblinDigModifierBehavior));
 
@@ -74,12 +71,50 @@ namespace rfmechanics
         }
 
         private static long lastStepHeightToggleSentMs;
+        private static long lastGoblinSpitSentMs;
 
         public override void StartClientSide(ICoreClientAPI api)
         {
             base.StartClientSide(api);
             RegisterElfStepHeightHotkey(api);
+            RegisterElfZoomHotkey(api);
+            RegisterGoblinSpitHotkey(api);
             RegisterFliesLagCommand(api);
+        }
+
+        /// <summary>Held-key registration only -- RFElfZoomBehavior.EvaluateWantsZoom polls this
+        /// hotkey's raw key state directly each tick, same shape as orc smell focus, so there is
+        /// no SetHotKeyHandler here.</summary>
+        private void RegisterElfZoomHotkey(ICoreClientAPI api)
+        {
+            api.Input.RegisterHotKey("rfelfzoom", "Elf Telescopic Vision", GlKeys.V, HotkeyType.CharacterControls);
+        }
+
+        /// <summary>Client hotkey -> server chat command, mirroring RegisterElfStepHeightHotkey's
+        /// pattern -- repairing spends a charge, so (unlike the idempotent step-height toggle) an
+        /// undebounced key-repeat burst would visibly overspend charges.
+        ///
+        /// LANDMINE: must return false for a non-goblin, not just skip sending the command --
+        /// dwarf ore-song shares this same default key (V), and HotkeyManager.TriggerHotKey stops
+        /// at the first same-keyed hotkey whose handler returns true, never even checking the
+        /// rest. Returning true unconditionally here (or in DwarfOreSongModSystem.TryTrigger)
+        /// would silently eat the other race's V press depending on which ModSystem happens to
+        /// register first.</summary>
+        private void RegisterGoblinSpitHotkey(ICoreClientAPI api)
+        {
+            api.Input.RegisterHotKey("rfgoblinspit", "Goblin Spit Repair", GlKeys.V, HotkeyType.CharacterControls);
+            api.Input.SetHotKeyHandler("rfgoblinspit", _ =>
+            {
+                IPlayer player = api.World.Player;
+                if (Config == null || player == null || !RaceTraits.HasTrait(player, Config.GoblinTraitCode)) return false;
+
+                long now = api.World.ElapsedMilliseconds;
+                if (now - lastGoblinSpitSentMs < 200) return true;
+                lastGoblinSpitSentMs = now;
+
+                api.SendChatMessage("/rfgoblinspit repair");
+                return true;
+            });
         }
 
         /// <summary>Separate command (not a /rfflies subcommand) and client-side, not
@@ -259,6 +294,7 @@ namespace rfmechanics
             RegisterRotAuraDiagCommand(api);
             RegisterRotAuraDebugCommand(api);
             RegisterElfStepHeightToggleCommand(api);
+            RegisterGoblinSpitCommand(api);
             RegisterChunkScarCommand(api);
             RegisterFliesDiagCommand(api);
         }
@@ -286,6 +322,81 @@ namespace rfmechanics
                         player.Entity.WatchedAttributes.SetBool("rf-elf-stepheight-enabled", next);
 
                         return TextCommandResult.Success(string.Format("Elf step height boost {0}.", next ? "enabled" : "disabled"));
+                    })
+                .EndSubCommand();
+        }
+
+        /// <summary>Server-side counterpart to the goblin spit client hotkey
+        /// (RegisterGoblinSpitHotkey) -- ported from the old RfGoblinSpitRepairBehavior
+        /// block-behavior, which ran via vanilla's own click-interact dispatch (client-predicted
+        /// + server-authoritative automatically). A bare hotkey has no such dispatch, so this
+        /// goes through a chat command instead, same shape as the elf step-height toggle.
+        /// Repairs whatever block the player is currently looking at (CurrentBlockSelection) --
+        /// present on the base IPlayer interface, so it's populated server-side too, and already
+        /// carries the same reach cap vanilla block selection always has.</summary>
+        private void RegisterGoblinSpitCommand(ICoreServerAPI api)
+        {
+            api.ChatCommands.Create("rfgoblinspit")
+                .WithDescription("Goblin spit repair for the calling player (also bound to a client hotkey, default V).")
+                .RequiresPrivilege(Privilege.chat)
+                .BeginSubCommand("repair")
+                    .HandleWith(args =>
+                    {
+                        IPlayer player = args.Caller.Player;
+                        if (player == null)
+                            return TextCommandResult.Success("No player context.");
+
+                        var cfg = Config;
+                        if (cfg == null || !cfg.EnableGoblinSpitCharges)
+                            return TextCommandResult.Success("Goblin spit charges are disabled.");
+
+                        if (!RaceTraits.HasTrait(player, cfg.GoblinTraitCode))
+                            return TextCommandResult.Success("Not a goblin.");
+
+                        BlockSelection blockSel = player.CurrentBlockSelection;
+                        if (blockSel == null)
+                            return TextCommandResult.Success("Nothing in reach to repair.");
+
+                        IWorldAccessor world = api.World;
+                        if (!world.Claims.TryAccess(player, blockSel.Position, EnumBlockAccessFlags.BuildOrBreak))
+                            return TextCommandResult.Success("You don't have access to build here.");
+
+                        EntityPlayer entityPlayer = player.Entity;
+                        const string SpitChargesKey = "rfmechanics:spitCharges";
+                        int charges = entityPlayer.WatchedAttributes.GetInt(SpitChargesKey, 0);
+                        if (charges <= 0)
+                            return TextCommandResult.Success("No spit left -- eat rot to refill.");
+
+                        Block block = world.BlockAccessor.GetBlock(blockSel.Position);
+                        var bec = block?.GetBEBehavior<BEBehaviorShapeFromAttributes>(blockSel.Position);
+                        if (bec == null)
+                            return TextCommandResult.Success("Nothing to repair here.");
+
+                        if (bec.repairState >= 1f || bec.reparability <= 1)
+                            return TextCommandResult.Success("Nothing more to repair here.");
+
+                        double repairQuantity = cfg.SpitRepairGain;
+                        if (repairQuantity < 0.001)
+                            return TextCommandResult.Success("Your spit has hardened -- no repair applied.");
+
+                        bec.repairState += (float)(repairQuantity * 5 / (bec.reparability - 1));
+
+                        // Vanilla's own BlockBehaviorReparable never calls MarkDirty either -- it
+                        // gets away with that because OnBlockInteractStart runs on both sides via
+                        // the click-interact dispatch, so the client's own local copy of
+                        // repairState is set directly by its own predicted execution. This command
+                        // only ever runs server-side, so without an explicit MarkDirty the client's
+                        // BE never re-syncs and the tooltip stays frozen at its last known value.
+                        bec.Blockentity.MarkDirty();
+
+                        int remaining = charges - 1;
+                        entityPlayer.WatchedAttributes.SetInt(SpitChargesKey, remaining);
+
+                        // Server-triggered PlaySoundAt broadcasts to nearby clients on its own --
+                        // no client-side branch needed here, unlike the old dual-invocation block behavior.
+                        world.PlaySoundAt(AssetLocation.Create("sounds/player/gluerepair"), blockSel.Position, 0, player, true, 8);
+
+                        return TextCommandResult.Success(string.Format("Spit thins -- {0} left.", remaining));
                     })
                 .EndSubCommand();
         }

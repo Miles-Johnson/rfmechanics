@@ -712,10 +712,10 @@ public class RFMechanicsConfig
 
     // ── Goblin spit charges (rot repair) ──
 
-    /// <summary>Master toggle for goblin spit charges (RfGoblinSpitChargeGrantPatch +
-    /// RfGoblinSpitRepairBehavior). A goblin's gut renders decay into a binding secretion --
-    /// eating game:rot grants charges, empty-hand interact on a reparable block spends one to
-    /// apply repair through the same repairState math vanilla glue uses.</summary>
+    /// <summary>Master toggle for goblin spit charges (GoblinSpitChargeGrantPatch +
+    /// RFMechanicsModSystem.RegisterGoblinSpitCommand). A goblin's gut renders decay into a
+    /// binding secretion -- eating game:rot grants charges, the "rfgoblinspit" hotkey spends one
+    /// to repair whatever's looked at through the same repairState math vanilla glue uses.</summary>
     public bool EnableGoblinSpitCharges { get; set; } = true;
 
     /// <summary>Spit charges granted per qualifying game:rot eat (gated the same way
@@ -833,12 +833,12 @@ public class RFMechanicsConfig
 
     // ── Dwarf ore-song (v1 wire-up) ──
 
-    /// <summary>Master toggle for the Dwarf ore-song mechanic (empty-hand knock on raw rock,
+    /// <summary>Master toggle for the Dwarf ore-song mechanic (the "rfdwarforesong" hotkey,
     /// nearby ore/gem deposits answer with a positioned sound per material). Client-only,
     /// no network traffic.</summary>
     public bool DwarfOreSongEnabled { get; set; } = true;
 
-    /// <summary>Scan radius in blocks around the knocked rock. Capped at 20 by
+    /// <summary>Scan radius in blocks around the player. Capped at 20 by
     /// DwarfOreSongModSystem (see notes/diagnostics/ore-song-discovery.md Q6 -- vanilla itself
     /// routes comparable-or-smaller inline WalkBlocks scans onto a background thread; a v1
     /// inline scan does not go past this cap).</summary>
