@@ -1,5 +1,47 @@
 # rfmechanics — handover (as of 2026-08-24)
 
+**Orc Band entitySize mesh-rebuild spam, fixed same day as the Thew/Band rework below
+(2026-08-24), built and deployed, awaiting in-game confirmation.** The Thew/Band rework's
+continuous Thew-derived `entitySize` glide (`BandBehavior.ComputeTargetSize`, rate-capped by
+`SizeChangeRatePerSecond`) wrote `WatchedAttributes.SetFloat("entitySize", ...)` on almost
+every server tick, since the target moves continuously now instead of only on rare band
+crossings. Each write fired PlayerModelLib's `entitySize`-watched-attribute listener
+(`PlayerSkinBehavior.OnModelSizeAttrChanged` → `ReplaceEntityShape()` →
+`entity.MarkShapeModified()`), causing a full client mesh dispose/re-tesselate/re-upload on the
+next render frame, plus an eye-height/collision-box recompute via
+`RFMechanicsModSystem.TryUpdatePmlEntityProperties`'s reflective `UpdateEntityProperties()`
+call. At ~30 ticks/sec this read as near-constant model twitching -- not a literal animation
+replay, no `StartAnimation`/`AnimManager` call exists anywhere in this mod.
+
+Fixed by quantizing the *written* value to a grid (new `EntitySizeWriteThreshold` config field,
+default 0.01) instead of gating the write on delta-from-last-written -- a delta-gated approach
+was tried and rejected: under ordinary drift `SizeChangeRatePerSecond`'s per-tick rate cap
+already exceeds the target's own per-tick movement (confirmed: `ThewDriftPerHour`/
+`ThewGainPerHour` 0.0025/in-game-hour, `ComputeTargetSize`'s Lean-Standard slope 0.629), so the
+internally-stepped size snaps to target almost every tick regardless of any delta threshold,
+and that gate never actually engages. `StepSizeTowardTarget` now tracks the continuous glide in
+a new private `pendingSize` field (decoupled from `lastKnownSize`, which now means "last value
+actually written") and only calls `SetFloat`/`TryUpdatePmlEntityProperties` when
+`Math.Round(pendingSize / q) * q` crosses a new grid line. `SelfHealEntitySize` quantizes the
+same way before writing, to avoid a self-heal immediately triggering a second unquantized-vs-
+quantized write on the very next tick.
+
+**Known caveat, not fixed, note for future sessions:** `StepSizeTowardTarget` runs
+unconditionally every tick, while `SelfHealEntitySize` only runs inside the 6-second
+`BandTickInterval`-gated block later in the same `OnGameTick`. If something external changes
+`entitySize` between self-heal checks, the stepper's own next-tick write will already overwrite
+it and resync `lastKnownSize` before self-heal ever sees the mismatch. Harmless for
+correctness (the stepper writes the right value regardless), but the self-heal warning log is
+no longer a reliable signal that nothing external touched `entitySize` -- silence doesn't prove
+it. **Also still open, unrelated to this fix:** `ComputeTargetSize`'s low-end extrapolation
+gives `entitySize` ~0.680 at Thew 0, smaller than a vanilla human -- an unresolved design
+question, not addressed here. `dotnet build -c Release`: 0 errors, 36 warnings (same baseline).
+Redeployed to the live install (`Mods/rfmechanics/rfmechanics.dll`, confirmed byte-identical
+post-copy), game closed at deploy time. **Not yet confirmed in-game** -- verification plan
+(steady-drift test expecting zero writes over ~2 minutes since one grid crossing takes ~12.7
+real minutes at the default quantum, plus a catch-up test via `/rfthew set`) is in
+`C:\Users\Kjol\.claude\plans\fix-orc-entitysize-mesh-rebuild-spam.md`.
+
 **Orc Smell — flat far-range particle floor (2026-08-24, same-day follow-up to the smell-size
 pass above): built and deployed, not yet confirmed in-game.** User wanted a hard guarantee that
 an animal at the edge of detection range reads as 1-2 particles, growing to the existing dense
@@ -445,7 +487,7 @@ behavior class).
 | `ThewDebtRepayPatch.cs` | `EntityBehaviorHunger.OnEntityReceiveSaturation` (postfix) | `OrcTraitCode` | `DebtRepaidPerSaturationPoint` | **New 2026-08-24, replaces the deleted `ThewEatPulsePatch.cs`/`ThewShieldPatch.cs` (a fresh class on the same hook, not a repurposed one).** Repays `BurnDebt` then `FrenzyDebt` on every eat, funded by saturation rather than Thew; also restamps `LastFoodCategoryKey`. **Not yet verified in-game.** |
 | `BurnBehavior.cs` | `EntityBehavior` (`OnGameTick`, `OnEntityReceiveDamage`), attached via `patches/seraph-thew.json`, registered as `"rfburn"` (`RFMechanicsModSystem.cs:39`) | `OrcTraitCode` (`IsOrc()`, inline) | `EnableBurn`, `BurnActivationHealthFracGap`, `BurnMaxHealPerSecond`, `BurnCurveExponent`, `BurnThewPerHp`, `BurnThewFloor`, `BurnFastTickMs` | **Debt-routed 2026-08-24** (was still the superseded flat/threshold model as of 2026-08-13 — see Testing status). Below `BurnActivationHealthFracGap` of MaxHealth, an orc with Thew above `BurnThewFloor` heals via the locked cubic curve, incurring `BurnDebt` (`BurnThewPerHp` per HP) instead of spending Thew directly. **Build-verified only, NOT yet confirmed in-game.** |
 | `FrenzyBehavior.cs` | `EntityBehavior`, one `RegisterGameTickListener` registered unconditionally in `Initialize` (no start/stop) | `OrcTraitCode` (`IsOrc()`, inline) | `EnableFrenzy`, `FrenzySatietyGate`, `FrenzyCurveExponent`, `FrenzyMaxSpeedBonus`, `FrenzyMaxJumpBonus`, `FrenzyDebtSatietyThreshold`, `FrenzyThewPerSecond`, `FrenzyFastTickMs`, `FrenzyStatWriteThreshold` | **Not previously in this table — added 2026-08-24 alongside its satiety rework.** Passive: every fast tick, ramps `walkspeed`/`jumpHeightMul` from the orc's current satFrac (zero at `FrenzySatietyGate` 0.50, full at 0), free above `FrenzyDebtSatietyThreshold` and debt-funded below it. Stops only when Thew is 0 with debt outstanding. **Not yet verified in-game.** |
-| `PreservedProteinPatch.cs` | `CollectibleObject.tryEatStop` (prefix) + `EntityBehaviorHunger.OnEntityReceiveSaturation` (prefix) | `OrcTraitCode` | `PreservedProteinItemCodes`, `PreservedProteinMultiplier` | **New 2026-08-05. Dormant** — the default item list has no obtainable production path in this install (config surface for modded preserved foods). |
+| `PreservedProteinPatch.cs` | *(retired)* | — | — | **Retired 2026-08-25** (dietsetup tag-engine migration step 9) — this was a second, independent diet-multiply system outside dietsetup entirely. Superseded by dietsetup's own `dietsetup:preservedMult` tag fold (`FoodTagRegistry.TagNutritionMultiplier`), which now applies to both satiety and nutrient-bar gain for any `preserved`-tagged food, not just the two hardcoded item codes this patch checked. |
 | `GoblinRotAuraBehavior.cs` | `EntityBehavior` (`OnGameTick`, `OnEntityDespawn`), attached via `seraph-goblinrotaura.json`, registered as `"rfgoblinrotaura"` (`RFMechanicsModSystem.cs:41`) | `GoblinTraitCode` (`IsGoblin()`, inline) | `EnableGoblinRotAura`, `EnableGoblinRotAuraCarriedInventory`, `GoblinRotAuraTickInterval`, `GoblinRotAuraRadiusMin/Max`, `GoblinRotAuraVerticalHalfExtent`, `GoblinRotAuraIntensityAtMinRadius`, `GoblinRotAuraRateMultiplier`, `GoblinRotAuraHoldFraction`, `GoblinRotAuraWriteThresholdHours`, `GoblinRotAuraHoldCreepFactor`, `GoblinRotAuraHoldCreepFloorHours`, `GoblinRotAuraIntakeHalfLifeHours` | **New 2026-08-12 (Phase G3) — not previously in this table.** ~2s server-side sweep around the goblin: accelerates spoilage on food in nearby placed containers and (2026-08-12 extension) carried hotbar/worn-bag inventories, held just short of fully spoiled ("larder hold") rather than tipping over. Publishes an `AuraSource` via the static `GoblinRotAuraRegistry` for other consumers (crop stunting, below) to read. Intake-driven shape: reads dietsetup's rot-intake accumulator directly off `WatchedAttributes` (no assembly reference). Deployed to the live install; **not yet smoke-tested in-game.** |
 | `GoblinCropStuntBehavior.cs` | `CropBehavior.TryGrowCrop`, registered as `"RfGoblinCropStunt"` (`RFMechanicsModSystem.cs:42`, `RegisterCropBehavior`) | Gated on aura presence, not a direct trait check | `EnableGoblinRotAura`, `CropStuntMinStrength` | **New 2026-08-12 (Phase G3) — not previously in this table.** Crops under a goblin's rot aura stop advancing growth stage (recoverable, never destroyed) — gated on `GoblinRotAuraRegistry`'s spatial falloff only, never on Intensity. Deployed; **not yet smoke-tested in-game.** |
 | `GoblinRotEdiblePatch.cs` | `CollectibleObject.GetNutritionProperties` (postfix) | `GoblinTraitCode` | `EnableGoblinRotEdible`, `GoblinRotEdibleSatiety` | **New 2026-08-12 (Phase G3) — not previously in this table.** Grants `game:rot` a minimal `FoodNutritionProperties` for goblins only, so vanilla's eat pipeline (which gates solely on a non-null result) lets them eat it. Never overrides an existing non-null result. Deployed; **not yet smoke-tested in-game.** |
@@ -778,9 +820,7 @@ Logic intact on disk, not currently reachable at runtime — moved to `src/BugRa
   `notes/race-mechanics/orc-phase4-burn-to-survive.md` for the as-built record and the flagged mismatch —
   needs a real code fix in `BurnBehavior.cs`/`RFMechanicsConfig.cs`, not just a doc
   correction, before this can be considered done.
-- `PreservedProteinPatch`: build-verified only, **dormant by design** (no reachable preserved
-  item in this install to test against) — not expected to be exercised until preserved-food
-  content exists.
+- `PreservedProteinPatch`: **retired 2026-08-25** — see the table entry above.
 - Dwarf features (mining/ore/climb-speed/climb-collide/climb-saturation): previously
   confirmed working in-game per the 2026-07-30 session notes, **except** the
   `ClimbSaturationPerSecond` live-value loose end noted above.

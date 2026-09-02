@@ -31,6 +31,12 @@ namespace rfmechanics
         /// differ for minutes at a time.</summary>
         private float lastKnownSize = float.NaN;
 
+        /// <summary>Internally-tracked continuous size, stepped every tick regardless of whether
+        /// it's been flushed to WatchedAttributes yet -- decoupled from lastKnownSize (the last
+        /// value actually written) so the rate cap keeps real-time accuracy while writes stay
+        /// quantized to EntitySizeWriteThreshold.</summary>
+        private float pendingSize = float.NaN;
+
         public BandBehavior(Entity entity) : base(entity) { }
 
         public override void Initialize(EntityProperties properties, JsonObject attributes)
@@ -94,6 +100,7 @@ namespace rfmechanics
                     // this same race swap, and reasserting it would fight that reset. Drop our own
                     // tracking so a later swap back doesn't self-heal against a stale expectation.
                     lastKnownSize = float.NaN;
+                    pendingSize = float.NaN;
                 }
                 return;
             }
@@ -219,24 +226,32 @@ namespace rfmechanics
             return leanSize + (standardSize - leanSize) * t2;
         }
 
-        /// <summary>Moves entitySize toward its Thew-derived target by at most
-        /// SizeChangeRatePerSecond * deltaTime -- the rate cap that replaced the old band-cross lerp.</summary>
+        /// <summary>Moves entitySize toward its Thew-derived target, rate-capped by
+        /// SizeChangeRatePerSecond. pendingSize steps every tick but only flushes to
+        /// WatchedAttributes -- each flush costs a client mesh rebuild via PlayerModelLib -- once
+        /// it crosses an EntitySizeWriteThreshold grid line; gating on delta-from-written instead
+        /// was rejected because under ordinary drift the rate cap already outpaces the target's
+        /// own per-tick movement, so that gate never engages.</summary>
         private void StepSizeTowardTarget(RFMechanicsConfig cfg, float deltaTime)
         {
             float thew = entity.GetBehavior<ThewBehavior>()?.Thew ?? 0f;
             float target = ComputeTargetSize(thew, cfg);
-            float current = entity.WatchedAttributes.GetFloat("entitySize", 1f);
+            float written = entity.WatchedAttributes.GetFloat("entitySize", 1f);
+
+            if (float.IsNaN(pendingSize)) pendingSize = written;
 
             float maxDelta = (float)cfg.SizeChangeRatePerSecond * deltaTime;
-            float diff = target - current;
-            float next = Math.Abs(diff) <= maxDelta ? target : current + Math.Sign(diff) * maxDelta;
+            float diff = target - pendingSize;
+            pendingSize = Math.Abs(diff) <= maxDelta ? target : pendingSize + Math.Sign(diff) * maxDelta;
 
-            if (next != current)
+            float q = (float)cfg.EntitySizeWriteThreshold;
+            float quantized = (float)(Math.Round(pendingSize / q) * q);
+            if (quantized != written)
             {
-                entity.WatchedAttributes.SetFloat("entitySize", next);
+                entity.WatchedAttributes.SetFloat("entitySize", quantized);
                 RFMechanicsModSystem.TryUpdatePmlEntityProperties(entity, out _);
+                lastKnownSize = quantized;
             }
-            lastKnownSize = next;
         }
 
         /// <summary>Snaps entitySize instantly to its current Thew-derived target if it drifts
@@ -253,13 +268,18 @@ namespace rfmechanics
 
             float thew = entity.GetBehavior<ThewBehavior>()?.Thew ?? 0f;
             float target = ComputeTargetSize(thew, cfg);
+            // Quantize here too -- an unquantized write lands off-grid, so the next tick's
+            // StepSizeTowardTarget would see it as a fresh grid crossing and write again immediately.
+            float q = (float)cfg.EntitySizeWriteThreshold;
+            float healed = (float)(Math.Round(target / q) * q);
 
-            entity.WatchedAttributes.SetFloat("entitySize", target);
-            lastKnownSize = target;
+            entity.WatchedAttributes.SetFloat("entitySize", healed);
+            lastKnownSize = healed;
+            pendingSize = healed;
             RFMechanicsModSystem.TryUpdatePmlEntityProperties(entity, out string message);
             entity.World.Api.Logger.Warning(
                 "[rfmechanics] BandBehavior self-healed entitySize for entity {0}: {1:F3} -> {2:F3} ({3})",
-                entity.EntityId, actual, target, message);
+                entity.EntityId, actual, healed, message);
         }
 
         private bool IsOrc()
