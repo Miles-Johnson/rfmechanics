@@ -3,6 +3,11 @@ using Vintagestory.GameContent;
 
 namespace rfmechanics
 {
+    // None covers both "no character class yet" and "human" -- there's no human trait code to
+    // check against, and every consumer only needs to distinguish "has one of the four abilities"
+    // from "doesn't."
+    public enum PlayerRace { None, Elf, Dwarf, Orc, Goblin }
+
     public static class RaceTraits
     {
         /// <summary>CharacterSystem.HasTrait returns true for a null/unset characterClass

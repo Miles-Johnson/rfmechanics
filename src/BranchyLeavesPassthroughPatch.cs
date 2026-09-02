@@ -96,10 +96,10 @@ namespace rfmechanics
                 if (!testerEntity.TryGetValue(__instance, out Entity? entity)) return;
 
                 // IsElf already applies the exact EntityPlayer/characterClass-null/HasTrait guard
-                // chain RefreshElfCache runs on its own slow tick -- reading it here (a field on
+                // chain RefreshRaceCache runs on its own slow tick -- reading it here (a field on
                 // the entity's own attached behavior) replaces walking the trait system on this
                 // per-substep hot path.
-                var identity = entity.GetBehavior<ElfIdentityBehavior>();
+                var identity = entity.GetBehavior<PlayerRaceBehavior>();
                 if (identity == null || !identity.IsElf) return;
 
                 // Matches how CollisionTester.ApplyTerrainCollision itself derives the entity's

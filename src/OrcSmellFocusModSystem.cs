@@ -19,7 +19,6 @@ namespace rfmechanics
         public override void StartClientSide(ICoreClientAPI api)
         {
             capi = api;
-            api.Input.RegisterHotKey("orcsmellfocus", "Orc Smell Focus", GlKeys.V, HotkeyType.CharacterControls);
 
             ambientMod = new AmbientModifier
             {
@@ -52,17 +51,14 @@ namespace rfmechanics
                 if (!capi.IsGamePaused)
                 {
                     IPlayer? player = capi.World.Player;
-                    if (player?.Entity != null)
+                    if (player?.Entity?.GetBehavior<PlayerRaceBehavior>()?.Race == PlayerRace.Orc)
                     {
-                        if (RaceTraits.HasTrait(player, cfg.OrcTraitCode))
-                        {
-                            eligible = true;
-                        }
+                        eligible = true;
                     }
                 }
 
                 bool held = false;
-                if (eligible && capi.Input.HotKeys.TryGetValue("orcsmellfocus", out HotKey hotkey))
+                if (eligible && capi.Input.HotKeys.TryGetValue("rfraceability", out HotKey hotkey))
                 {
                     held = capi.Input.KeyboardKeyStateRaw[(int)hotkey.CurrentMapping.KeyCode];
                 }

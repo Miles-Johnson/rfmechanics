@@ -41,7 +41,7 @@ namespace rfmechanics
                 config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
 
             api.RegisterEntityBehaviorClass("rftreeproximity", typeof(RFTreeProximityBehavior));
-            api.RegisterEntityBehaviorClass("rfelfidentity", typeof(ElfIdentityBehavior));
+            api.RegisterEntityBehaviorClass("rfelfidentity", typeof(PlayerRaceBehavior));
             api.RegisterEntityBehaviorClass("rfelfstepheight", typeof(ElfStepHeightBehavior));
             api.RegisterEntityBehaviorClass("rfelfzoom", typeof(RFElfZoomBehavior));
             api.RegisterEntityBehaviorClass("rfthew", typeof(ThewBehavior));
@@ -86,44 +86,23 @@ namespace rfmechanics
         {
             base.StartClientSide(api);
             RegisterElfStepHeightHotkey(api);
-            RegisterElfZoomHotkey(api);
-            RegisterGoblinSpitHotkey(api);
             RegisterFliesLagCommand(api);
         }
 
-        /// <summary>Held-key registration only -- RFElfZoomBehavior.EvaluateWantsZoom polls this
-        /// hotkey's raw key state directly each tick, same shape as orc smell focus, so there is
-        /// no SetHotKeyHandler here.</summary>
-        private void RegisterElfZoomHotkey(ICoreClientAPI api)
+        /// <summary>Called from RaceAbilityHotkeyModSystem's dispatch table once it has already
+        /// confirmed the presser is cached as Goblin -- no race check here, that decision belongs
+        /// to the dispatcher alone. Repairing spends a charge, so (unlike the idempotent
+        /// step-height toggle) an undebounced key-repeat burst would visibly overspend charges.</summary>
+        internal bool TryTriggerGoblinSpit(ICoreClientAPI api)
         {
-            api.Input.RegisterHotKey("rfelfzoom", "Elf Telescopic Vision", GlKeys.V, HotkeyType.CharacterControls);
-        }
+            if (Config == null) return false;
 
-        /// <summary>Client hotkey -> server chat command, mirroring RegisterElfStepHeightHotkey's
-        /// pattern -- repairing spends a charge, so (unlike the idempotent step-height toggle) an
-        /// undebounced key-repeat burst would visibly overspend charges.
-        ///
-        /// LANDMINE: must return false for a non-goblin, not just skip sending the command --
-        /// dwarf ore-song shares this same default key (V), and HotkeyManager.TriggerHotKey stops
-        /// at the first same-keyed hotkey whose handler returns true, never even checking the
-        /// rest. Returning true unconditionally here (or in DwarfOreSongModSystem.TryTrigger)
-        /// would silently eat the other race's V press depending on which ModSystem happens to
-        /// register first.</summary>
-        private void RegisterGoblinSpitHotkey(ICoreClientAPI api)
-        {
-            api.Input.RegisterHotKey("rfgoblinspit", "Goblin Spit Repair", GlKeys.V, HotkeyType.CharacterControls);
-            api.Input.SetHotKeyHandler("rfgoblinspit", _ =>
-            {
-                IPlayer player = api.World.Player;
-                if (Config == null || player == null || !RaceTraits.HasTrait(player, Config.GoblinTraitCode)) return false;
+            long now = api.World.ElapsedMilliseconds;
+            if (now - lastGoblinSpitSentMs < 200) return true;
+            lastGoblinSpitSentMs = now;
 
-                long now = api.World.ElapsedMilliseconds;
-                if (now - lastGoblinSpitSentMs < 200) return true;
-                lastGoblinSpitSentMs = now;
-
-                api.SendChatMessage("/rfgoblinspit repair");
-                return true;
-            });
+            api.SendChatMessage("/rfgoblinspit repair");
+            return true;
         }
 
         /// <summary>Separate command (not a /rfflies subcommand) and client-side, not
@@ -335,18 +314,20 @@ namespace rfmechanics
                 .EndSubCommand();
         }
 
-        /// <summary>Server-side counterpart to the goblin spit client hotkey
-        /// (RegisterGoblinSpitHotkey) -- ported from the old RfGoblinSpitRepairBehavior
-        /// block-behavior, which ran via vanilla's own click-interact dispatch (client-predicted
-        /// + server-authoritative automatically). A bare hotkey has no such dispatch, so this
-        /// goes through a chat command instead, same shape as the elf step-height toggle.
-        /// Repairs whatever block the player is currently looking at (CurrentBlockSelection) --
-        /// present on the base IPlayer interface, so it's populated server-side too, and already
-        /// carries the same reach cap vanilla block selection always has.</summary>
+        /// <summary>Server-side counterpart to the goblin spit ability, dispatched client-side by
+        /// RaceAbilityHotkeyModSystem via RFMechanicsModSystem.TryTriggerGoblinSpit -- ported from
+        /// the old RfGoblinSpitRepairBehavior block-behavior, which ran via vanilla's own
+        /// click-interact dispatch (client-predicted + server-authoritative automatically). A bare
+        /// hotkey has no such dispatch, so this goes through a chat command instead, same shape as
+        /// the elf step-height toggle. Repairs whatever block the player is currently looking at
+        /// (CurrentBlockSelection) -- present on the base IPlayer interface, so it's populated
+        /// server-side too, and already carries the same reach cap vanilla block selection always
+        /// has. Re-checks race fresh (not the client's cache) since this is the trust boundary for
+        /// a client-triggered command.</summary>
         private void RegisterGoblinSpitCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfgoblinspit")
-                .WithDescription("Goblin spit repair for the calling player (also bound to a client hotkey, default V).")
+                .WithDescription("Goblin spit repair for the calling player (also bound to a client hotkey, default C).")
                 .RequiresPrivilege(Privilege.chat)
                 .BeginSubCommand("repair")
                     .HandleWith(args =>

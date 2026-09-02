@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Historical record only, superseded by ElfIdentityBehavior. The implicit SDK glob would
+    <!-- Historical record only, superseded by PlayerRaceBehavior. The implicit SDK glob would
          otherwise compile everything under archive/ too. -->
     <Compile Remove="archive/**/*.cs" />
   </ItemGroup>

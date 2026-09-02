@@ -6,9 +6,9 @@ using Vintagestory.API.Common.Entities;
 namespace rfmechanics
 {
     /// <summary>
-    /// Telescopic vision: holding the "rfelfzoom" hotkey (default V) eases the FOV down to
-    /// ElfZoomFovMult; releasing eases it back to 1.0. No attunement gate -- every elf has this
-    /// at all times, gated only by ElfIdentityBehavior.IsElf.
+    /// Telescopic vision: holding the shared "rfraceability" hotkey (default C) while cached as an
+    /// elf eases the FOV down to ElfZoomFovMult; releasing eases it back to 1.0. No attunement gate
+    /// -- every elf has this at all times, gated only by PlayerRaceBehavior.IsElf.
     ///
     /// Recomputes the zoom target every tick from live conditions rather than latching a
     /// press/release flag, so it structurally cannot get stuck -- release, opening a GUI, and
@@ -71,7 +71,7 @@ namespace rfmechanics
             if (!entity.Alive) { zoomKeyHeldMs = 0f; return false; }
             if (entity.Api is not ICoreClientAPI capi) return false;
 
-            bool held = capi.Input.HotKeys.TryGetValue("rfelfzoom", out HotKey hotkey)
+            bool held = capi.Input.HotKeys.TryGetValue("rfraceability", out HotKey hotkey)
                 && capi.Input.KeyboardKeyStateRaw[(int)hotkey.CurrentMapping.KeyCode];
 
             if (!held)
@@ -81,7 +81,7 @@ namespace rfmechanics
             }
             zoomKeyHeldMs += deltaTime * 1000f;
 
-            var identity = entity.GetBehavior<ElfIdentityBehavior>();
+            var identity = entity.GetBehavior<PlayerRaceBehavior>();
             if (identity == null || !identity.IsElf) return false;
 
             if (!capi.Input.MouseGrabbed) return false;

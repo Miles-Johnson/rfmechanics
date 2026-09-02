@@ -17,9 +17,9 @@ namespace rfmechanics
     /// <summary>
     /// Client-only lookup table plus trigger for the Dwarf ore-song mechanic: maps every
     /// registered Ore-material block id to (asset path, grade-derived gain), and fires a scan
-    /// centered on the player from a dedicated hotkey (default V) -- Variant["type"]/["grade"]/
-    /// ["potential"] reads are already O(1) per-block, so the lookup just memoizes an
-    /// already-cheap read (see notes/diagnostics/ore-song-discovery.md Q1).
+    /// centered on the player when RaceAbilityHotkeyModSystem dispatches to TryTrigger --
+    /// Variant["type"]/["grade"]/["potential"] reads are already O(1) per-block, so the lookup
+    /// just memoizes an already-cheap read (see notes/diagnostics/ore-song-discovery.md Q1).
     ///
     /// Client-only (ShouldLoad), mirroring GoblinDarkvisionModSystem's own pattern (Q3) --
     /// exactly one instance ever exists, so unlike RFMechanicsModSystem.Api this has no
@@ -37,24 +37,20 @@ namespace rfmechanics
         {
             base.StartClientSide(api);
             BuildLookup(api);
-
-            api.Input.RegisterHotKey("rfdwarforesong", "Dwarf Ore Song", GlKeys.V, HotkeyType.CharacterControls);
-            api.Input.SetHotKeyHandler("rfdwarforesong", _ => TryTrigger(api));
         }
 
         /// <summary>Moved here from the old right-click-on-rock BlockBehavior -- same cooldown
-        /// key and trait gate, just centered on the player's feet instead of a clicked block
-        /// position, since a keypress has no block selection to read.
+        /// key, just centered on the player's feet instead of a clicked block position, since a
+        /// keypress has no block selection to read.
         ///
-        /// LANDMINE: must return false whenever this isn't a dwarf, not just no-op -- goblin
-        /// spit shares this same default key (V), and HotkeyManager.TriggerHotKey stops at the
-        /// first same-keyed hotkey whose handler returns true, never even checking the rest.
-        /// Returning true unconditionally here silently ate every non-dwarf's V press.</summary>
-        private bool TryTrigger(ICoreClientAPI api)
+        /// Called from RaceAbilityHotkeyModSystem's dispatch table once it has already confirmed
+        /// the presser is cached as Dwarf -- no race check here, that decision belongs to the
+        /// dispatcher alone.</summary>
+        internal bool TryTrigger(ICoreClientAPI api)
         {
             var cfg = RFMechanicsModSystem.Config;
             IPlayer player = api.World.Player;
-            if (cfg == null || player?.Entity == null || !RaceTraits.HasTrait(player, cfg.DwarfTraitCode)) return false;
+            if (cfg == null || player?.Entity == null) return false;
 
             if (!cfg.DwarfOreSongEnabled) return true;
 

@@ -12,7 +12,7 @@ namespace rfmechanics
     /// and MotionAndCollision (the FindSteppableCollisionBox call site) runs for players on both
     /// sides, same reason TreeClimbingPatch patches the base class instead of
     /// EntityBehaviorPlayerPhysics -- so this behavior is attached dual-side too
-    /// (seraph-elfstepheight.json), same lesson as ElfIdentityBehavior.
+    /// (seraph-elfstepheight.json), same lesson as PlayerRaceBehavior.
     ///
     /// restoreValue is captured once in Initialize(), not hardcoded to vanilla's 0.6f default --
     /// a pinned literal would go stale against a future vanilla change or another mod's own
@@ -55,7 +55,7 @@ namespace rfmechanics
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null) return;
 
-            bool isElf = entity.GetBehavior<ElfIdentityBehavior>()?.IsElf ?? false;
+            bool isElf = entity.GetBehavior<PlayerRaceBehavior>()?.IsElf ?? false;
             bool toggledOn = entity.WatchedAttributes.GetBool("rf-elf-stepheight-enabled", cfg.ElfStepHeightDefaultEnabled);
 
             float target = (cfg.EnableElfStepHeight && isElf && toggledOn)

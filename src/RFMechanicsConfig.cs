@@ -92,7 +92,7 @@ public class RFMechanicsConfig
 
     /// <summary>Master toggle for the Elf reduced-hunger-drain effect, parity with every other
     /// mechanic in this config. Unconditional for elves now (no attunement threshold) -- applied
-    /// by ElfIdentityBehavior directly off IsElf.</summary>
+    /// by PlayerRaceBehavior directly off IsElf.</summary>
     public bool EnableElfHungerDrainReduction { get; set; } = true;
 
     /// <summary>Hungerrate multiplier while active, applied as a Stats.Set delta (target - 1)
@@ -135,7 +135,7 @@ public class RFMechanicsConfig
 
     // ── Elf identity ──
 
-    /// <summary>Tick cadence, in seconds, for ElfIdentityBehavior's race-cache refresh (after the
+    /// <summary>Tick cadence, in seconds, for PlayerRaceBehavior's race-cache refresh (after the
     /// immediate Initialize()-time refresh). Matches GoblinRotAuraTickInterval's 2.0s precedent.</summary>
     public double ElfIdentityTickInterval { get; set; } = 2.0;
 
@@ -714,8 +714,9 @@ public class RFMechanicsConfig
 
     /// <summary>Master toggle for goblin spit charges (GoblinSpitChargeGrantPatch +
     /// RFMechanicsModSystem.RegisterGoblinSpitCommand). A goblin's gut renders decay into a
-    /// binding secretion -- eating game:rot grants charges, the "rfgoblinspit" hotkey spends one
-    /// to repair whatever's looked at through the same repairState math vanilla glue uses.</summary>
+    /// binding secretion -- eating game:rot grants charges, the shared "rfraceability" hotkey
+    /// (as a goblin) spends one to repair whatever's looked at through the same repairState math
+    /// vanilla glue uses.</summary>
     public bool EnableGoblinSpitCharges { get; set; } = true;
 
     /// <summary>Spit charges granted per qualifying game:rot eat (gated the same way
@@ -833,9 +834,9 @@ public class RFMechanicsConfig
 
     // ── Dwarf ore-song (v1 wire-up) ──
 
-    /// <summary>Master toggle for the Dwarf ore-song mechanic (the "rfdwarforesong" hotkey,
-    /// nearby ore/gem deposits answer with a positioned sound per material). Client-only,
-    /// no network traffic.</summary>
+    /// <summary>Master toggle for the Dwarf ore-song mechanic (the shared "rfraceability" hotkey,
+    /// as a dwarf, makes nearby ore/gem deposits answer with a positioned sound per material).
+    /// Client-only, no network traffic.</summary>
     public bool DwarfOreSongEnabled { get; set; } = true;
 
     /// <summary>Scan radius in blocks around the player. Capped at 20 by

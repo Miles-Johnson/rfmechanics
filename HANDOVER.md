@@ -1,4 +1,52 @@
-# rfmechanics — handover (as of 2026-08-24)
+# rfmechanics — handover (as of 2026-09-02)
+
+**Race ability hotkeys consolidated from four to one (2026-09-02), built, not yet deployed
+or confirmed in-game.** `orcsmellfocus`, `rfelfzoom`, `rfdwarforesong`, and `rfgoblinspit`
+all defaulted to the same key (`GlKeys.V`) on the theory that races are mutually exclusive
+per player, so a shared default wasn't a real conflict -- true internally, but Vintage
+Story dispatches a keypress to every handler bound to a key regardless of mod, so a
+third-party mod also bound to V (`slowwalkmod`) threw inside its own handler every time any
+race pressed their ability key (`notes/slowwalkmod-orcsmell-hotkey-crash.md`). Replaced all
+four with one hotkey, `rfraceability` (default `GlKeys.C`), registered and dispatched by
+the new `RaceAbilityHotkeyModSystem`. **The four old code strings are retired permanently
+and must never be reused** -- a removed hotkey code's `clientsettings.json` rebind entry is
+orphaned forever, not cleaned up, so re-registering one of those strings would silently
+resurrect a player's old rebind under new semantics. Moving off V avoids the slowwalkmod
+collision as a side effect of the new default key; the collision itself is not fixed and
+was not attempted.
+
+Dwarf (ore song) and goblin (spit repair) stay discrete presses, now dispatched through a
+`Dictionary<PlayerRace, Func<ICoreClientAPI, bool>>` in `RaceAbilityHotkeyModSystem`
+keyed by cached race -- one ability per race is assumed, noted in a comment at the
+dictionary. Orc (smell focus) and elf (zoom) stay held ramps, unchanged in mechanism
+(`OrcSmellFocusModSystem.OnRenderFrame`, `RFElfZoomBehavior.OnGameTick` still poll raw key
+state directly each frame/tick), just reading `"rfraceability"` instead of their own
+dedicated code and gating on cached race instead of a fresh `RaceTraits.HasTrait` call.
+`DwarfOreSongModSystem.TryTrigger` and a new `RFMechanicsModSystem.TryTriggerGoblinSpit`
+(extracted from the old `RegisterGoblinSpitHotkey` closure) dropped their own race checks
+entirely -- the dispatcher already gates on cached race before calling either, so a second
+fresh check would have contradicted the point of routing everything through the cache.
+Server-side `RegisterGoblinSpitCommand` keeps its own fresh `RaceTraits.HasTrait` check
+unchanged, since that's a trust boundary on a client-triggered command, not a UX cost.
+
+The race cache itself (`ElfIdentityBehavior`, renamed `PlayerRaceBehavior`) generalized
+from a single `IsElf` bool to a `PlayerRace Race` property (checked against all four trait
+codes on its existing tick-refresh cadence; `IsElf` kept as `Race == PlayerRace.Elf` so the
+three unrelated consumers -- `BranchyLeavesPassthroughPatch`, `ElfStepHeightBehavior`,
+`RFTreeProximityBehavior` -- needed no logic changes, only the generic type argument at
+their `GetBehavior<T>()` call). Registration key stays `"rfelfidentity"` (a JSON
+entity-behavior attachment key, not user-facing) so `seraph-elfidentity.json` needed no
+change. Elf step-height toggle (Ctrl+H) is untouched -- different key, different mechanism,
+out of scope for this consolidation.
+
+Version bumped to `0.1.2-test.1`. `dotnet build -c Release`: 0 errors, 35 warnings, all
+pre-existing (verified by location -- none fall on a line this change touched or in either
+new file). **Not verifiable without playing the game:** whether holding C as an orc/elf
+actually ramps/zooms, whether pressing C as a dwarf/goblin actually triggers its ability
+(and respects its existing cooldown/debounce), and whether pressing C as a human (or any
+race with no ability) correctly falls through to `false` without eating the keypress. A
+clean build proves the dispatch table compiles and loads; it proves nothing about whether
+the race→ability mapping fires the right ability at runtime.
 
 **Orc Band entitySize mesh-rebuild spam, fixed same day as the Thew/Band rework below
 (2026-08-24), built and deployed, awaiting in-game confirmation.** The Thew/Band rework's
@@ -499,8 +547,9 @@ behavior class).
 | `OrcSmellModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, one `RegisterGameTickListener` doing detection + synchronous `SpawnParticles` emission | `OrcTraitCode` (own inline check, local player only) | `SmellEnabled`, `SmellTickIntervalMs`, `SmellRangeBase`, `SmellRangePerSize`, `SmellRangeHungerBonus`, `SmellRangeHardCap`, `SmellMaxSources`, `SmellVerticalRange` (config-key list stale beyond this pre-2026-08-24; not otherwise re-audited this pass) | **New 2026-08-23.** Player-anchored drift-particle band toward nearby fauna, direction + rough distance only, no marker ever placed on the source. See `notes/race-mechanics/orc-smell-v1-handover.md` for the full design rationale and six bugs fixed in review before any in-game test. **Extended 2026-08-24**: detection radius now gets a hunger-scaled bonus (`SmellRangeHungerBonus`, same ramp shape as `FrenzyBehavior`) and every computed radius plus `maxScan` are hard-clamped at `SmellRangeHardCap` (128 blocks, the server's own tracking cutoff — also fixes `maxScan` previously sitting 12 blocks past it). **Further extended same day**: far-range particle count (`SmellParticlesFar`) is now an additive floor guaranteed per-source against the shared `SmellMaxParticles` budget — see the dedicated entry above. Deployed; **not yet confirmed in-game.** |
 | `OrcPuffModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, one `RegisterGameTickListener` reading `ThewBehavior.StateAttributeKey` off nearby players | — (reads the raw `rf-orc-state` byte for any `EntityPlayer`, no trait check of its own — the byte is only ever nonzero for an orc) | `EnablePuff`, `PuffIntervalGaining`, `PuffIntervalLightDebt`, `PuffIntervalHeavyDebt`, `PuffRenderRange`, `PuffParticleCount` | **New 2026-08-24.** Short fixed-size particle burst on an interval that scales with orc Thew state (idle/gaining/light debt/heavy debt) rather than a continuous emitter. State 1 (gaining) is local-player-only; states 2/3 (debt) render for every nearby player within `PuffRenderRange`. **Not yet verified in-game.** |
 | `OrcSmellClassifier.cs` | Not a Harmony patch — plain static helper, no registration | — | — | **New 2026-08-23.** `IsSmellableFauna(Entity)`: `EntityBehaviorHarvestable` present AND `creatureDiet` attribute present, both required (excludes drifters/shivers, which are harvestable but have no diet). |
-| `ElfIdentityBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfidentity.json` **both sides**, registered as `"rfelfidentity"` | `ElfTraitCode` (own `RefreshElfCache`) | `ElfIdentityTickInterval`, `EnableElfHungerDrainReduction`, `ElfHungerRateMult` | **New 2026-08-17.** Replaces `ElfAttunementBehavior` (archived same day — see `archive/elf-attunement/ARCHIVED.md`) as the sole "is this player an elf" source: one cached `IsElf` bool, refreshed immediately in `Initialize()` and every `ElfIdentityTickInterval` thereafter. No float, no thresholds, no census. Also applies/clears the reduced-hunger-drain stat (`"hungerrate"`, source `"rf-elf-attunement"`, key name unchanged) unconditionally off `IsElf`, re-derived every identity tick rather than edge-triggered — self-heals a stat left behind by the old code without a migration pass. `RFElfZoomBehavior`, `BranchyLeavesPassthroughPatch`, and `RFTreeProximityBehavior` all read `IsElf` directly. |
-| `ElfStepHeightBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfstepheight.json` **both sides**, registered as `"rfelfstepheight"` | Reads `ElfIdentityBehavior.IsElf`, no direct trait check | `EnableElfStepHeight`, `ElfStepHeightValue` (1.0), `ElfStepHeightDefaultEnabled` | **New 2026-08-17.** Sets `EntityBehaviorControlledPhysics.StepHeight` to `ElfStepHeightValue` for elves, a plain field write (public field, no Harmony patch needed). Captures the entity's actual pre-existing `StepHeight` once in `Initialize()` as the restore value (not a hardcoded vanilla 0.6f) and only writes when the current value disagrees with the target. Per-player toggle in `WatchedAttributes["rf-elf-stepheight-enabled"]`, flipped via `/rfelfstepheight toggle` (bound to a client hotkey, default Ctrl+H, 200ms debounce). 1.0 is exactly `FindSteppableCollisionBox`'s threshold, so elves auto-climb fences/stair edges — this is why the toggle exists. |
+| `PlayerRaceBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfidentity.json` **both sides**, registered as `"rfelfidentity"` (historical key, kept — a JSON attachment key, not user-facing) | Checks all four of `ElfTraitCode`/`DwarfTraitCode`/`OrcTraitCode`/`GoblinTraitCode` (own `RefreshRaceCache`) | `ElfIdentityTickInterval`, `EnableElfHungerDrainReduction`, `ElfHungerRateMult` | **New 2026-08-17 as `ElfIdentityBehavior` (elf-only), generalized 2026-09-02 to `PlayerRaceBehavior`.** Sole per-player race cache: one `PlayerRace Race` property, refreshed immediately in `Initialize()` and every `ElfIdentityTickInterval` thereafter. `IsElf` kept as `Race == PlayerRace.Elf` so its three pre-existing consumers (`RFElfZoomBehavior`, `BranchyLeavesPassthroughPatch`, `RFTreeProximityBehavior`) needed no logic changes. `RaceAbilityHotkeyModSystem` (below) and `OrcSmellFocusModSystem` read `Race` directly. Also applies/clears the reduced-hunger-drain stat (`"hungerrate"`, source `"rf-elf-attunement"`, key name unchanged) unconditionally off `IsElf`, re-derived every identity tick rather than edge-triggered. |
+| `ElfStepHeightBehavior.cs` | `EntityBehavior` (`Initialize`, `OnGameTick`), attached via `patches/seraph-elfstepheight.json` **both sides**, registered as `"rfelfstepheight"` | Reads `PlayerRaceBehavior.IsElf`, no direct trait check | `EnableElfStepHeight`, `ElfStepHeightValue` (1.0), `ElfStepHeightDefaultEnabled` | **New 2026-08-17.** Sets `EntityBehaviorControlledPhysics.StepHeight` to `ElfStepHeightValue` for elves, a plain field write (public field, no Harmony patch needed). Captures the entity's actual pre-existing `StepHeight` once in `Initialize()` as the restore value (not a hardcoded vanilla 0.6f) and only writes when the current value disagrees with the target. Per-player toggle in `WatchedAttributes["rf-elf-stepheight-enabled"]`, flipped via `/rfelfstepheight toggle` (bound to a client hotkey, default Ctrl+H, 200ms debounce) — **unaffected by the 2026-09-02 race-ability hotkey consolidation**, different key, different mechanism. 1.0 is exactly `FindSteppableCollisionBox`'s threshold, so elves auto-climb fences/stair edges — this is why the toggle exists. |
+| `RaceAbilityHotkeyModSystem.cs` | Not a Harmony patch — client-only `ModSystem`, auto-discovered, registers hotkey `"rfraceability"` (default `GlKeys.C`) | Dispatches by `PlayerRaceBehavior.Race`, no direct trait check | — | **New 2026-09-02.** Replaces the four old per-race V-bound hotkeys (`orcsmellfocus`, `rfelfzoom`, `rfdwarforesong`, `rfgoblinspit` — all retired permanently). `SetHotKeyHandler` dispatches Dwarf/Goblin presses through a `Dictionary<PlayerRace, Func<ICoreClientAPI, bool>>` to `DwarfOreSongModSystem.TryTrigger`/`RFMechanicsModSystem.TryTriggerGoblinSpit`; returns `false` for any other race (including Human) so other mods bound to C still see the press. Orc/Elf held ramps are unaffected in mechanism — `OrcSmellFocusModSystem`/`RFElfZoomBehavior` still poll raw key state themselves, just against this shared code now. **Built, not yet confirmed in-game.** |
 | `RFMechanicsConfig.cs` | — | — | (all of the above, plus `DwarfTraitCode` default `"rf-dwarf-positive"`, `ElfTraitCode` default `"rf-elf-positive"`, `GoblinTraitCode` default `"rf-goblin-positive"`, `OrcTraitCode` default `"rf-orc-positive"`, and the `OrcBandTriple`/`OrcBandUpDown`/`OrcStomachStackingMode` helper types) | Shared config POCO. `_UNWIRED`-suffixed fields (`BulkyJumpHeightReduction_UNWIRED`, `StandardKnockbackTakenReduction_UNWIRED`) are reserved config surface only, not consumed by any code — see `BandBehavior.cs`'s row above. Confirmed unchanged 2026-08-13. |
 | `RFMechanicsModSystem.cs` | — | — | — | **Corrected 2026-08-13, `rfrested` registration removed 2026-08-14 (Phase 0)** — the registration list below was previously incomplete. `Start()`: load config, register entity/crop/block behavior classes `rftreeproximity`, `rfthew`, `rfband`, `rfburn`, `rfgoblintunnel`, `rfgoblinrotaura`, `RfGoblinCropStunt`, `RfGoblinSpitRepair` (eight calls, `RFMechanicsModSystem.cs:35-43`), then `harmony.PatchAll(Assembly.GetExecutingAssembly())`. `StartServerSide()`: registers `/dwarfdepth`, `/rfdiag`, `/rfstatsfix`, `/rfphase0`, `/rfthew`, and (2026-08-12, previously undocumented here) `/rfrotdiag`/`/rfrotaura` — all server-side only, use the full `/name`, not the `.` shortcut. |
 

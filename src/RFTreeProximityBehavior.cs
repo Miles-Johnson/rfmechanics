@@ -39,7 +39,7 @@ namespace rfmechanics
             // compute, so paying the 1331-block WalkBlocks scan every tick interval would be pure
             // waste. Reads the cached bool rather than walking the trait system directly, same
             // shape as BranchyLeavesPassthroughPatch's IsElf read.
-            var identity = entity.GetBehavior<ElfIdentityBehavior>();
+            var identity = entity.GetBehavior<PlayerRaceBehavior>();
             if (identity == null || !identity.IsElf)
             {
                 // Clears any previously applied bonus rather than leaving it stuck from a race/class change.
