@@ -28,6 +28,15 @@ namespace rfmechanics
 
             LoadConfig(api);
 
+            api.Logger.Notification("[{0}] Build {1} ({2}{3})", Mod.Info.ModID, Mod.Info.Version,
+                GitInfo.Sha, GitInfo.Dirty ? "-dirty" : "");
+
+            if (!api.ModLoader.IsModEnabled("raceframework"))
+            {
+                api.Logger.Notification("[{0}] raceframework not detected — race-trait mechanics ({1}, {2}, {3}, {4}) will never trigger; running in Mods-solo mode.",
+                    Mod.Info.ModID, config.DwarfTraitCode, config.ElfTraitCode, config.OrcTraitCode, config.GoblinTraitCode);
+            }
+
             api.Logger.Notification("[rfmechanics] Config loaded. DwarfTraitCode={0}, EnableMiningCurve={1}, EnableOreCurve={2}, OreThreshold={3}, OreCeiling={4}, ClimbSpeedFactor={5}, ClimbSaturationPerSecond={6}, EnableClimbSpeed={7}, EnableClimbSaturation={8}, ElfTraitCode={9}, EnableBranchyLeavesPassthrough={10}, EnableTreeProximitySpeed={11}, TreeProximityRadius={12}, TreeProximityMaxBonus={13}, EnableTreeClimbing={14}, EnableFallDamageReduction={15}, FallDamageReductionFactor={16}, GoblinTraitCode={17}, EnableGoblinDarkvision={18}, GoblinDarkvisionStrength={19}, EnableGoblinFallDamageReduction={20}, GoblinFallDamageReductionFactor={21}",
                 config.DwarfTraitCode, config.EnableMiningCurve, config.EnableOreCurve, config.OreThreshold, config.OreCeiling, config.ClimbSpeedFactor, config.ClimbSaturationPerSecond, config.EnableClimbSpeed, config.EnableClimbSaturation, config.ElfTraitCode, config.EnableBranchyLeavesPassthrough, config.EnableTreeProximitySpeed, config.TreeProximityRadius, config.TreeProximityMaxBonus, config.EnableTreeClimbing, config.EnableFallDamageReduction, config.FallDamageReductionFactor, config.GoblinTraitCode, config.EnableGoblinDarkvision, config.GoblinDarkvisionStrength, config.EnableGoblinFallDamageReduction, config.GoblinFallDamageReductionFactor);
 

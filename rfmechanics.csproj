@@ -7,6 +7,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Overridable via -p:RfMechanicsDeployPath=... . Defaults to the Mods junction itself, not its
+       target, so deploy follows whichever profile the junction points at without this file
+       naming it (mirrors dietsetup's DietSetupDeployPath convention). -->
+  <PropertyGroup>
+    <RfMechanicsDeployPath Condition="'$(RfMechanicsDeployPath)' == ''">$(VINTAGE_STORY_DATA)\Mods\rfmechanics</RfMechanicsDeployPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Historical record only, superseded by ElfIdentityBehavior. The implicit SDK glob would
          otherwise compile everything under archive/ too. -->
@@ -40,5 +47,40 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- Stamps GitInfo.g.cs with the short SHA + dirty flag so a running build can log what it
+       actually is (Phase A). git absent/unavailable -> "unknown", never a build failure. -->
+  <Target Name="GenerateGitInfo" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RfMechanicsGitShaOutput" />
+    </Exec>
+    <Exec Command="git status --porcelain" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RfMechanicsGitStatusOutput" />
+    </Exec>
+    <PropertyGroup>
+      <RfMechanicsGitSha Condition="'@(RfMechanicsGitShaOutput)' != ''">@(RfMechanicsGitShaOutput)</RfMechanicsGitSha>
+      <RfMechanicsGitSha Condition="'$(RfMechanicsGitSha)' == ''">unknown</RfMechanicsGitSha>
+      <RfMechanicsGitDirty Condition="'@(RfMechanicsGitStatusOutput)' != ''">true</RfMechanicsGitDirty>
+      <RfMechanicsGitDirty Condition="'$(RfMechanicsGitDirty)' == ''">false</RfMechanicsGitDirty>
+    </PropertyGroup>
+    <ItemGroup>
+      <RfMechanicsGitInfoLines Include="internal static class GitInfo" />
+      <RfMechanicsGitInfoLines Include="{" />
+      <RfMechanicsGitInfoLines Include="    public const string Sha = &quot;$(RfMechanicsGitSha)&quot;%3b" />
+      <RfMechanicsGitInfoLines Include="    public const bool Dirty = $(RfMechanicsGitDirty)%3b" />
+      <RfMechanicsGitInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)GitInfo.g.cs" Lines="@(RfMechanicsGitInfoLines)" Overwrite="true" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)GitInfo.g.cs" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Stages, mirrors to the client Mods folder, and (Release only) zips + copies to
+       $(MOD_STAGING_PATH), all from the single exclude list owned by Package.ps1, so the
+       client folder and the server zip can never diverge from each other (Phase A D1/D6). -->
+  <Target Name="Deploy" AfterTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Package.ps1&quot; -Dll &quot;$(TargetPath)&quot; -Pdb &quot;$(TargetDir)$(TargetName).pdb&quot; -DeployPath &quot;$(RfMechanicsDeployPath)&quot; -StagingPath &quot;$(MOD_STAGING_PATH)&quot; -Configuration $(Configuration)" ContinueOnError="false" />
+  </Target>
 
 </Project>
