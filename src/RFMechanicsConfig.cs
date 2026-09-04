@@ -175,14 +175,13 @@ public class RFMechanicsConfig
     /// <summary>Trait code for the orc race. Note the model itself is spelled "ork" in racialequality/PlayerModelLib -- "orc" is this mod's own naming.</summary>
     public string OrcTraitCode { get; set; } = "rf-orc-positive";
 
-    /// <summary>Multiplier applied to MaxSaturation for orc players (bigger stomach), relative to
-    /// the vanilla base (1500). Combined with racialability's own "maxSaturationFactor" trait
-    /// stat (e.g. the bottomless-stomach ability, 3x) per StomachStackingMode.</summary>
+    /// <summary>DORMANT: orc's stomach multiplier now lives in traits.json (rf-orc-positive's
+    /// maxSaturationFactor) like every other race. No longer read anywhere; left in place so
+    /// existing rfmechanics.json installs don't drop the key.</summary>
     public double OrcStomachMultiplier { get; set; } = 2.5;
 
-    /// <summary>How OrcStomachMultiplier combines with racialability's own "maxSaturationFactor"
-    /// when both are active. Max (default): take the larger candidate, never compounds.
-    /// Multiply: the original behavior (2.5x * 3x = 7.5x), preserved as an option.</summary>
+    /// <summary>DORMANT: paired with OrcStomachMultiplier above -- no longer read anywhere; left
+    /// in place so existing rfmechanics.json installs don't drop the key.</summary>
     public OrcStomachStackingMode StomachStackingMode { get; set; } = OrcStomachStackingMode.Max;
 
     /// <summary>Ceiling Thew is reset down to on death, never up -- a Thew &gt; this value drops to
@@ -1098,8 +1097,7 @@ public class RFMechanicsConfig
     public string[] SmellForcePredatorCodes { get; set; } = new[] { "feverstonewilds:hellboar" };
 }
 
-/// <summary>How OrcStomachMultiplier combines with racialability's own maxSaturationFactor
-/// trait stat. See RFMechanicsConfig.StomachStackingMode's doc comment.</summary>
+/// <summary>DORMANT: backed StomachStackingMode, itself dormant -- see its doc comment.</summary>
 public enum OrcStomachStackingMode
 {
     Max,

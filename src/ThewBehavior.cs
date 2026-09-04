@@ -103,7 +103,7 @@ namespace rfmechanics
                 entity.Attributes.SetBool(InitializedKey, true);
                 Thew = (float)cfg.ThewCreationFloor;
             }
-            ApplyStomachMultiplier(cfg, isOrc);
+            ApplyStomachMultiplier(cfg);
 
             if (!isOrc)
             {
@@ -177,39 +177,22 @@ namespace rfmechanics
             }
         }
 
-        /// <summary>Vanilla MaxSaturation before any multiplier (player.json); both stacking-mode
-        /// candidates are computed from this baseline rather than reverse-engineered out of a
-        /// live MaxSaturation value that may already reflect racialability's own contribution.</summary>
+        /// <summary>Vanilla MaxSaturation before any multiplier (player.json); the target is computed
+        /// from this baseline rather than reverse-engineered out of a live MaxSaturation value that
+        /// may already reflect racialability's own contribution.</summary>
         private const float VanillaBaseMaxSaturation = 1500f;
 
         /// <summary>
-        /// Recomputes and re-asserts MaxSaturation every tick rather than a one-time multiply/
-        /// divide, because "max" stacking mode needs to compare two fresh candidates each tick --
-        /// multiplying/dividing the current value would still compound with PlayerModelLib's own
-        /// reactive rescale-on-change postfix. Reads entity.Stats.GetBlended("maxSaturationFactor")
-        /// directly (the actual source stat racialability writes) rather than an already-modified
-        /// MaxSaturation. Runs regardless of isOrc so a non-orc's racialability contribution still applies.
+        /// Recomputes every tick to avoid compounding with PlayerModelLib's reactive rescale
+        /// postfix. Orc's multiplier now comes from traits.json (rf-orc-positive), not a config path.
         /// </summary>
-        private void ApplyStomachMultiplier(RFMechanicsConfig cfg, bool isOrc)
+        private void ApplyStomachMultiplier(RFMechanicsConfig cfg)
         {
             var hunger = entity.GetBehavior<EntityBehaviorHunger>();
             if (hunger == null) return;
 
             float racialabilityFactor = entity.Stats.GetBlended("maxSaturationFactor");
-            float racialabilityCandidate = VanillaBaseMaxSaturation * racialabilityFactor;
-
-            float target;
-            if (isOrc)
-            {
-                float orcCandidate = VanillaBaseMaxSaturation * (float)cfg.OrcStomachMultiplier;
-                target = cfg.StomachStackingMode == OrcStomachStackingMode.Max
-                    ? Math.Max(orcCandidate, racialabilityCandidate)
-                    : orcCandidate * racialabilityFactor;
-            }
-            else
-            {
-                target = racialabilityCandidate;
-            }
+            float target = VanillaBaseMaxSaturation * racialabilityFactor;
 
             if (Math.Abs(hunger.MaxSaturation - target) > 0.5f)
             {
