@@ -86,12 +86,6 @@
     {
         "op": "add",
         "path": "/cropProps/behaviors",
-        "file": "game:blocktypes/plant/crop/bellpepper.json",
-        "value": [{ "name": "RfGoblinCropStunt" }]
-    },
-    {
-        "op": "add",
-        "path": "/cropProps/behaviors",
         "file": "game:blocktypes/plant/crop/peanut.json",
         "value": [{ "name": "RfGoblinCropStunt" }]
     },
