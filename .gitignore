@@ -12,3 +12,7 @@ artifacts/
 # OS cruft
 Thumbs.db
 .DS_Store
+
+# Asset generation intermediates
+tools/oresong/wav/
+__pycache__/

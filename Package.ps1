@@ -1,219 +1,159 @@
-# Single source of truth for what this mod ships. The client mirror (client deploy path) and
-# the server zip are both produced from the one staged output below, so they can never drift
-# from each other the way two independent exclude lists eventually would.
 [CmdletBinding()]
 param(
     [string]$Dll = "",
     [string]$Pdb = "",
     [string]$DeployPath = "",
     [string]$StagingPath = "",
-    [string]$Configuration = "Debug"
+    [string]$Configuration = "Release",
+    [string]$OutputDirectory = "",
+    [switch]$ReleaseCandidate
 )
-
-$ErrorActionPreference = "Stop"
-
+$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+$repoRoot = [IO.Path]::GetFullPath($PSScriptRoot)
+$manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'modinfo.json') -Raw | ConvertFrom-Json
+$modId = $manifest.modid
+$version = $manifest.version
+if ($modId -notmatch '^[a-z0-9]+$' -or $version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Invalid package identity' }
+& (Join-Path $repoRoot 'Validate.ps1')
+if ($manifest.type -eq 'code' -and (-not $Dll -or -not (Test-Path -LiteralPath $Dll -PathType Leaf))) { throw 'A built mod DLL is required' }
 
-# Hashes entry name + entry bytes, not raw zip/file bytes -- mtime alone shouldn't trip this.
-# .dll/.pdb are excluded: verified empirically (dietsetup) that a rebuilt dll is not byte-identical
-# across back-to-back builds of unchanged source (every asset was identical, only the dll
-# differed), so comparing it would false-positive on every legitimate rebuild. Source changes are
-# already tracked via git; this guard is about the shipped asset/config payload silently changing
-# under an unchanged version string, which is what actually broke before.
-#
-# Text files are also CRLF/LF-normalized before hashing: this repo runs core.autocrlf=true, so a
-# plain git checkout can flip a tracked JSON file's line endings with zero semantic change --
-# verified empirically that a revert-via-checkout alone was enough to trip an un-normalized version
-# of this guard on a build with no real content change.
-function Get-NormalizedBytes {
-    param([byte[]]$Bytes, [string]$Extension)
-    if ($Extension -in '.json', '.md', '.txt', '.fsh', '.vsh') {
-        $text = [System.Text.Encoding]::UTF8.GetString($Bytes) -replace "`r`n", "`n" -replace "`r", "`n"
-        return [System.Text.Encoding]::UTF8.GetBytes($text)
+function Assert-ChildPath([string]$Path, [string]$Parent) {
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetFullPath($Parent).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw "Path outside intended directory: $resolved" }
+    if (Test-Path -LiteralPath $resolved) {
+        if ((Get-Item -LiteralPath $resolved).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing reparse-point target: $resolved" }
     }
-    return $Bytes
 }
-
-function Get-StagedContentHash {
-    param([string]$StageRoot)
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    $lines = Get-ChildItem -Path $StageRoot -Recurse -File | Where-Object { $_.Extension -notin '.dll', '.pdb' } | ForEach-Object {
-        $rel = $_.FullName.Substring($StageRoot.Length).TrimStart('\','/').Replace('\','/')
-        $bytes = Get-NormalizedBytes -Bytes ([System.IO.File]::ReadAllBytes($_.FullName)) -Extension $_.Extension
-        $hash = [System.BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '')
-        "$rel`:$hash"
+function Hash-Bytes([byte[]]$Bytes) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+function Hash-Tree([string]$Directory) {
+    $rows = Get-ChildItem -LiteralPath $Directory -Recurse -File | ForEach-Object {
+        $name = $_.FullName.Substring($Directory.Length).TrimStart('\','/').Replace('\','/')
+        "$name`:$(Hash-Bytes ([IO.File]::ReadAllBytes($_.FullName)))"
     }
-    $joined = [System.Text.Encoding]::UTF8.GetBytes((($lines | Sort-Object) -join "`n"))
-    return [System.BitConverter]::ToString($sha256.ComputeHash($joined)).Replace('-', '')
+    return Hash-Bytes ([Text.Encoding]::UTF8.GetBytes((($rows | Sort-Object) -join "`n")))
 }
-
-function Get-ZipContentHash {
-    param([string]$ZipPath)
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+function Hash-Zip([string]$Path) {
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
-        $lines = $zip.Entries | Where-Object { $_.FullName -notmatch '\.(dll|pdb)$' } | ForEach-Object {
-            $stream = $_.Open()
-            $ms = New-Object System.IO.MemoryStream
-            $stream.CopyTo($ms)
-            $stream.Dispose()
-            $ext = [System.IO.Path]::GetExtension($_.FullName)
-            $bytes = Get-NormalizedBytes -Bytes ($ms.ToArray()) -Extension $ext
-            $hash = [System.BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '')
-            $ms.Dispose()
-            "$($_.FullName):$hash"
+        $rows = foreach ($entry in $zip.Entries) {
+            $stream = $entry.Open(); $memory = New-Object IO.MemoryStream
+            try { $stream.CopyTo($memory); "$($entry.FullName):$(Hash-Bytes ($memory.ToArray()))" }
+            finally { $stream.Dispose(); $memory.Dispose() }
         }
-    } finally {
-        $zip.Dispose()
-    }
-    $joined = [System.Text.Encoding]::UTF8.GetBytes((($lines | Sort-Object) -join "`n"))
-    return [System.BitConverter]::ToString($sha256.ComputeHash($joined)).Replace('-', '')
+        return Hash-Bytes ([Text.Encoding]::UTF8.GetBytes((($rows | Sort-Object) -join "`n")))
+    } finally { $zip.Dispose() }
 }
 
-$repoRoot = (Split-Path -Parent $MyInvocation.MyCommand.Path).TrimEnd('\')
-$modInfoPath = Join-Path $repoRoot "modinfo.json"
-$modInfo = Get-Content $modInfoPath -Raw | ConvertFrom-Json
-$modId = $modInfo.modid
-$version = $modInfo.version
-
-$excludeGlobs = @(
-    "assets\rfmechanics\patches-disabled-bugrace\*"
-)
-
-$DeployPath = $DeployPath.TrimEnd('\')
-$StagingPath = $StagingPath.TrimEnd('\')
-
-$stageDir = Join-Path $repoRoot "obj\package\stage"
-if (Test-Path $stageDir) {
-    Remove-Item $stageDir -Recurse -Force
+$sourceIdentity = & (Join-Path $repoRoot 'SourceIdentity.ps1')
+if ($ReleaseCandidate -and ($sourceIdentity.dirty -or $sourceIdentity.sha -eq 'unknown' -or $Configuration -ne 'Release')) { throw 'Release candidates require Release configuration, clean source and known full SHA' }
+if ($ReleaseCandidate -and $manifest.type -eq 'code') {
+    $generated = Join-Path $repoRoot "obj/$Configuration/GitInfo.g.cs"
+    if (-not (Test-Path -LiteralPath $generated)) { throw 'Build the candidate with Build.ps1 before packaging' }
+    $compiledStamp = Get-Content -LiteralPath $generated -Raw
+    if (-not $compiledStamp.Contains('Sha = "' + $sourceIdentity.sha + '"') -or -not $compiledStamp.Contains('Dirty = false')) { throw 'Compiled source identity differs; rebuild with Build.ps1' }
 }
+$stageDir = Join-Path $repoRoot ('obj/package/stage-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-
-Copy-Item $modInfoPath (Join-Path $stageDir "modinfo.json") -Force
-
-if ($Dll -ne "" -and (Test-Path $Dll)) {
-    Copy-Item $Dll (Join-Path $stageDir (Split-Path -Leaf $Dll)) -Force
+if ($manifest.type -eq 'code') { Copy-Item -LiteralPath $Dll -Destination (Join-Path $stageDir "$modId.dll") }
+Copy-Item -LiteralPath (Join-Path $repoRoot 'modinfo.json') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stageDir
+foreach ($name in @('LICENSE','CREDITS.md','THIRD_PARTY_NOTICES.md','CHANGELOG.md')) { Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination $stageDir }
+foreach ($name in @('licenses','ModConfig-examples')) {
+    if (Test-Path -LiteralPath (Join-Path $repoRoot $name)) { Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination $stageDir -Recurse }
 }
-# Excluded from Release: $excludeGlobs only filters the assets/ walk below, not this copy, and
-# a pdb has no reason to ship in the server/client zip.
-if ($Pdb -ne "" -and (Test-Path $Pdb) -and $Configuration -ne "Release") {
-    Copy-Item $Pdb (Join-Path $stageDir (Split-Path -Leaf $Pdb)) -Force
+if ($Configuration -ne 'Release' -and $Pdb -ne '' -and (Test-Path -LiteralPath $Pdb)) { Copy-Item -LiteralPath $Pdb -Destination $stageDir }
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'assets') -Recurse -File) {
+    if ($file.Name -like 'dev-*.json' -or $file.FullName -like '*\patches-disabled-bugrace\*') { continue }
+    $relative = $file.FullName.Substring($repoRoot.Length + 1)
+    $destination = Join-Path $stageDir $relative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $destination
 }
-
-$assetsSrc = Join-Path $repoRoot "assets"
-$stagedCount = 0
-$excludedCount = 0
-if (Test-Path $assetsSrc) {
-    $assetFiles = Get-ChildItem -Path $assetsSrc -Recurse -File
-    foreach ($file in $assetFiles) {
-        $relPath = $file.FullName.Substring($repoRoot.Length + 1)
-        $excluded = $false
-        foreach ($glob in $excludeGlobs) {
-            if ($relPath -like $glob) { $excluded = $true; break }
-        }
-        if ($excluded) {
-            $excludedCount++
-            Write-Host "[$modId] Excluded from package: $relPath"
-            continue
-        }
-        $destPath = Join-Path $stageDir $relPath
-        $destDir = Split-Path -Parent $destPath
-        if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-        Copy-Item $file.FullName $destPath -Force
-        $stagedCount++
-    }
+$dllHash = if ($manifest.type -eq 'code') { (Get-FileHash -LiteralPath $Dll -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+$sourceDirectory = if (Test-Path -LiteralPath (Join-Path $repoRoot 'src')) { Join-Path $repoRoot 'src' } else { Join-Path $repoRoot 'assets' }
+$identity = [ordered]@{
+    modid = $modId; version = $version; sha = $sourceIdentity.sha; shortSha = $sourceIdentity.shortSha; dirty = $sourceIdentity.dirty
+    sourceRevision = $sourceIdentity.sha; sourceDirty = $sourceIdentity.dirty; gitTree = $sourceIdentity.tree
+    sourceTreeSha256 = (Hash-Tree $sourceDirectory); dllSha256 = $dllHash; configuration = $Configuration
 }
-Write-Host "[$modId] Staged $stagedCount asset file(s), excluded $excludedCount"
-
-if ($DeployPath -ne "") {
-    if (-not (Test-Path $DeployPath)) { New-Item -ItemType Directory -Path $DeployPath -Force | Out-Null }
-
-    $stagedFiles = Get-ChildItem -Path $stageDir -Recurse -File
-    $stagedRelPaths = @{}
-    foreach ($file in $stagedFiles) {
-        $relPath = $file.FullName.Substring($stageDir.Length + 1)
-        $stagedRelPaths[$relPath] = $true
-        $destPath = Join-Path $DeployPath $relPath
-        $destDir = Split-Path -Parent $destPath
-        if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-        Copy-Item $file.FullName $destPath -Force
-    }
-
-    $deployedFiles = Get-ChildItem -Path $DeployPath -Recurse -File
-    $staleCount = 0
-    foreach ($file in $deployedFiles) {
-        $relPath = $file.FullName.Substring($DeployPath.Length + 1)
-        if (-not $stagedRelPaths.ContainsKey($relPath)) {
-            Remove-Item $file.FullName -Force
-            $staleCount++
-        }
-    }
-    Write-Host "[$modId] Deployed to $DeployPath : $($stagedFiles.Count) copied, $staleCount stale removed"
-} else {
-    Write-Host "[$modId] DeployPath not set, skipping client mirror"
+foreach ($name in @('build-info.json','build-stamp.json')) {
+    [IO.File]::WriteAllText((Join-Path $stageDir $name), ($identity | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 }
 
-if ($Configuration -eq "Release") {
-    $artifactsDir = Join-Path $repoRoot "artifacts"
-    if (-not (Test-Path $artifactsDir)) { New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null }
-
-    $zipPath = Join-Path $artifactsDir "${modId}_${version}.zip"
-    if (Test-Path $zipPath) {
-        # Same-name/different-content is now the normal case: test builds keep the version string
-        # fixed across iterations, so this reports the overwrite instead of refusing it.
-        $existingHash = Get-ZipContentHash -ZipPath $zipPath
-        $newHash = Get-StagedContentHash -StageRoot $stageDir
-        if ($existingHash -ne $newHash) {
-            Write-Host "[$modId] Content changed for ${zipPath}: $existingHash -> $newHash. Overwriting." -ForegroundColor Yellow
-        }
-        Remove-Item $zipPath -Force
-    }
-
-    # Compress-Archive under Windows PowerShell 5.1 writes \ as the entry separator, which Linux
-    # treats as a literal filename character -- the game's asset VFS then finds nothing under
-    # assets/<domain>/... Writing entries by hand keeps the separator explicit.
-    $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
-    Get-ChildItem -Path $stageDir -Recurse -File | ForEach-Object {
-        $rel = $_.FullName.Substring($stageDir.Length).TrimStart('\','/').Replace('\','/')
-        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel)
-    }
-    $zip.Dispose()
-    Write-Host "[$modId] Packaged $zipPath"
-
-    # Catches a regression of the Compress-Archive backslash bug (proven against
-    # tools/zip-packaging-fixtures/known-bad-backslash.zip) plus the other way this fails: a wrong
-    # staging root producing a zip with no assets/<modid>/ entries at all. Runs before the staging
-    # copy so a bad zip never reaches the server.
-    $verifyZip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-    try {
-        $entryNames = $verifyZip.Entries | ForEach-Object { $_.FullName }
-    } finally {
-        $verifyZip.Dispose()
-    }
-
-    $zipErrors = @()
-    $backslashEntries = $entryNames | Where-Object { $_.Contains('\') }
-    if ($backslashEntries) { $zipErrors += "backslash in entry name(s): $($backslashEntries -join ', ')" }
-    $leadingSlashEntries = $entryNames | Where-Object { $_.StartsWith('/') }
-    if ($leadingSlashEntries) { $zipErrors += "leading slash in entry name(s): $($leadingSlashEntries -join ', ')" }
-    $dupeEntries = $entryNames | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name }
-    if ($dupeEntries) { $zipErrors += "duplicate entry name(s): $($dupeEntries -join ', ')" }
-    $assetsPrefix = "assets/$modId/"
-    if (-not ($entryNames | Where-Object { $_.StartsWith($assetsPrefix) })) {
-        $zipErrors += "no entry starts with '$assetsPrefix' -- wrong staging root?"
-    }
-    if ($zipErrors.Count -gt 0) {
-        Write-Error "[$modId] Packaged zip failed entry-name validation:`n$($zipErrors -join "`n")"
-        exit 1
-    }
-
-    if ($StagingPath -ne "") {
-        if (-not (Test-Path $StagingPath)) { New-Item -ItemType Directory -Path $StagingPath -Force | Out-Null }
-        Copy-Item $zipPath (Join-Path $StagingPath (Split-Path -Leaf $zipPath)) -Force
-        Write-Host "[$modId] Copied zip to staging path $StagingPath"
+if ($Configuration -eq 'Release') {
+    $artifacts = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $repoRoot 'artifacts' }
+    New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+    $zipPath = Join-Path $artifacts "${modId}_${version}.zip"
+    if (Test-Path -LiteralPath $zipPath) {
+        if ((Hash-Zip $zipPath) -ne (Hash-Tree $stageDir)) { throw "Version $version already has different content (including DLL). Choose a new prerelease version." }
+        Write-Host "Reusing identical package $zipPath"
     } else {
-        Write-Host "[$modId] MOD_STAGING_PATH not set, skipping server-staging copy"
+        # Explicit forward slashes keep asset paths valid on Linux servers.
+        $zip = [IO.Compression.ZipFile]::Open($zipPath, 'Create')
+        try {
+            foreach ($file in Get-ChildItem -LiteralPath $stageDir -Recurse -File) {
+                $relative = $file.FullName.Substring($stageDir.Length + 1).Replace('\','/')
+                [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $relative)
+            }
+        } finally { $zip.Dispose() }
+    }
+    $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+    try {
+        $names = @($zip.Entries | ForEach-Object { $_.FullName })
+        if ($names | Where-Object { $_.Contains('\') -or $_.StartsWith('/') -or $_.Split('/') -contains '..' }) { throw 'Unsafe archive entry name' }
+        if ($names | Group-Object | Where-Object Count -gt 1) { throw 'Duplicate archive entry' }
+        $requiredEntries = @('modinfo.json', 'README.md', 'LICENSE', 'CREDITS.md', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'build-info.json', 'build-stamp.json')
+        if ($manifest.type -eq 'code') { $requiredEntries += "$modId.dll"; $requiredEntries += 'licenses/VintageStory-source.txt' }
+        if ($modId -eq 'dietsetup') { $requiredEntries += 'ModConfig-examples/bindings.json.example' }
+        if ($modId -eq 'rfmechanics') { $requiredEntries += 'licenses/Spyglass-MIT.txt' }
+        foreach ($required in $requiredEntries) {
+            if ($names -notcontains $required) { throw "Missing $required" }
+        }
+        if (-not ($names | Where-Object { $_.StartsWith("assets/$modId/") })) { throw 'Missing assets' }
+        if ($names | Where-Object { $_ -match '(^|/)dev-.*\.json$|\.pdb$|hydrateordiedrate' }) { throw 'Development or unsupported content in release' }
+    } finally { $zip.Dispose() }
+    $checksum = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText("$zipPath.sha256", "$checksum  $([IO.Path]::GetFileName($zipPath))`n")
+    Write-Host "Packaged $zipPath SHA256=$checksum"
+    if ($StagingPath -ne '') {
+        New-Item -ItemType Directory -Path $StagingPath -Force | Out-Null
+        $destination = Join-Path $StagingPath ([IO.Path]::GetFileName($zipPath))
+        if ((Test-Path -LiteralPath $destination) -and (Get-FileHash -LiteralPath $destination).Hash.ToLowerInvariant() -ne $checksum) { throw 'Staging already contains a different archive for this version' }
+        Copy-Item -LiteralPath $zipPath -Destination $destination -Force
+        Copy-Item -LiteralPath "$zipPath.sha256" -Destination "$destination.sha256" -Force
     }
 }
-
-exit 0
+if ($DeployPath -ne '') {
+    $DeployPath = [IO.Path]::GetFullPath($DeployPath).TrimEnd('\','/')
+    if ([IO.Path]::GetFileName($DeployPath) -ne $modId) { throw 'DeployPath must be a dedicated directory named for this mod ID' }
+    if (Test-Path -LiteralPath $DeployPath) {
+        $existing = @(Get-ChildItem -LiteralPath $DeployPath -Recurse -Force)
+        if (((Get-Item -LiteralPath $DeployPath).Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($existing | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) { throw 'Resolve mod-directory links before installation' }
+        foreach ($file in $existing | Where-Object { -not $_.PSIsContainer }) {
+            $handle = [IO.File]::Open($file.FullName, 'Open', 'ReadWrite', 'None')
+            $handle.Dispose()
+        }
+    }
+    New-Item -ItemType Directory -Path $DeployPath -Force | Out-Null
+    $staged = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $stageDir -Recurse -File) {
+        $relative = $file.FullName.Substring($stageDir.Length + 1); $staged[$relative] = $true
+        $destination = Join-Path $DeployPath $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $DeployPath -Recurse -File) {
+        if (-not $staged.ContainsKey($file.FullName.Substring($DeployPath.Length + 1))) {
+            Assert-ChildPath $file.FullName $DeployPath
+            Remove-Item -LiteralPath $file.FullName -Force
+        }
+    }
+    if ((Hash-Tree $DeployPath) -ne (Hash-Tree $stageDir)) { throw 'Client verification failed; stop before server upload' }
+    Write-Host "Deployed and verified on disk: $DeployPath. Relaunch a running client before joining."
+}

@@ -16,9 +16,11 @@ namespace rfmechanics
     public readonly struct AuraSource
     {
         public BlockPos Pos { get; init; }
-        public int Radius { get; init; }
+        public Vec3d Center { get; init; }
+        public double Radius { get; init; }
         public int VerticalHalfExtent { get; init; }
         public float Intensity { get; init; }
+        public float Fade { get; init; }
         public long UpdatedMs { get; init; }
     }
 
@@ -36,6 +38,8 @@ namespace rfmechanics
             sources.Remove(entityId);
         }
 
+        internal static void ClearAll() => sources.Clear();
+
         /// <summary>For the /rfrotaura debug command -- lets an admin confirm an entry disappears on logout rather than inferring it from side effects.</summary>
         public static IReadOnlyDictionary<long, AuraSource> AllSources => sources;
 
@@ -48,7 +52,7 @@ namespace rfmechanics
             foreach (KeyValuePair<long, AuraSource> kv in sources)
             {
                 if (nowMs - kv.Value.UpdatedMs > staleAfterMs) continue;
-                float falloff = SpatialFalloff(kv.Value, pos);
+                float falloff = SpatialFalloff(kv.Value, pos) * kv.Value.Fade;
                 if (falloff > best) best = falloff;
             }
             return best;
@@ -57,10 +61,17 @@ namespace rfmechanics
         /// <summary>Cylinder falloff: horizontal and vertical distance handled independently, not a true cube-applies-uniformly effect.</summary>
         public static float SpatialFalloff(AuraSource src, BlockPos pos)
         {
-            double dh = System.Math.Sqrt(System.Math.Pow(pos.X + 0.5 - src.Pos.X, 2) + System.Math.Pow(pos.Z + 0.5 - src.Pos.Z, 2));
-            double dv = System.Math.Abs(pos.Y + 0.5 - src.Pos.Y);
+            return SpatialFalloff(src, new Vec3d(pos.X + 0.5, pos.Y + 0.5, pos.Z + 0.5), pos.dimension);
+        }
+
+        public static float SpatialFalloff(AuraSource src, Vec3d pos, int dimension)
+        {
+            if (src.Radius <= 0 || src.Center == null || src.Pos.dimension != dimension) return 0;
+            double dx = pos.X - src.Center.X, dz = pos.Z - src.Center.Z;
+            double dh = System.Math.Sqrt(dx * dx + dz * dz);
+            double dv = System.Math.Abs(pos.Y - src.Center.Y);
             return (float)GameMath.Clamp(1.0 - dh / src.Radius, 0.0, 1.0)
-                 * (float)GameMath.Clamp(1.0 - dv / (src.VerticalHalfExtent + 1), 0.0, 1.0);
+                 * (float)GameMath.Clamp(1.0 - dv / (src.VerticalHalfExtent + 0.5), 0.0, 1.0);
         }
     }
 }

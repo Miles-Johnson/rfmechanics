@@ -35,23 +35,17 @@ namespace rfmechanics
             AssetLocation code = entity.Code;
             if (categoryCache.TryGetValue(code, out ScentCategory cached)) return cached;
 
-            ScentCategory category;
-            if (Array.IndexOf(cfg.SmellForcePredatorCodes, code.ToString()) >= 0)
-            {
-                category = ScentCategory.Predator;
-            }
-            else if (cfg.SmellUseEntityTags && HasAnyTag(entity, cfg.SmellPredatorTags))
-            {
-                category = ScentCategory.Predator;
-            }
-            else
-            {
-                category = ClassifyDiet(entity);
-            }
+            bool forced = Array.IndexOf(cfg.SmellForcePredatorCodes, code.ToString()) >= 0;
+            bool dangerous = cfg.SmellUseEntityTags && HasAnyTag(entity, cfg.SmellPredatorTags);
+            ScentCategory category = ResolveCategory(forced, dangerous,
+                forced || dangerous ? ScentCategory.Unknown : ClassifyDiet(entity));
 
             categoryCache[code] = category;
             return category;
         }
+
+        internal static ScentCategory ResolveCategory(bool forced, bool dangerous, ScentCategory diet) =>
+            forced || dangerous ? ScentCategory.Predator : diet;
 
         // Entity.HasTags is obsolete as of 1.22 ("avoid using in favor of matching directly
         // against Tags") and was an ALL-match (Tags.ContainsAll) besides -- Overlaps is the

@@ -18,13 +18,13 @@ namespace rfmechanics
         public override void StartClientSide(ICoreClientAPI api)
         {
             api.ChatCommands.Create("rfflycheck")
-                .WithDescription("TEMP: read characterClass/rotIntake/spitCharges off a named player's WatchedAttributes, as seen by this client.")
+                .WithDescription("Read a named player's server aura snapshot and spit charges as seen by this client (.rfflycheck).")
                 .RequiresPrivilege(Privilege.chat)
                 .WithArgs(api.ChatCommands.Parsers.Word("playername"))
                 .HandleWith(args =>
                 {
                     string targetName = (string)args[0];
-                    IPlayer target = null;
+                    IPlayer? target = null;
                     foreach (var p in api.World.AllOnlinePlayers)
                     {
                         if (p.PlayerName == targetName) { target = p; break; }
@@ -41,11 +41,14 @@ namespace rfmechanics
                     double rotIntake = entity.WatchedAttributes.GetDouble("dietsetup:intake:rot", -1);
                     bool hasSpitCharges = entity.WatchedAttributes.HasAttribute("rfmechanics:spitCharges");
                     int spitCharges = entity.WatchedAttributes.GetInt("rfmechanics:spitCharges", -1);
+                    var aura = GoblinRotAuraState.ReadVisual(entity);
+                    bool hasAura = entity.WatchedAttributes.HasAttribute(GoblinRotAuraState.SnapshotKey);
 
                     return TextCommandResult.Success(
                         $"characterClass={(charClass ?? "<null/default>")} | " +
                         $"dietsetup:intake:rot present={hasRotIntake} value={rotIntake} | " +
-                        $"rfmechanics:spitCharges present={hasSpitCharges} value={spitCharges}");
+                        $"rfmechanics:spitCharges present={hasSpitCharges} value={spitCharges} | " +
+                        $"auraSnapshot present={hasAura} active={aura.Active} radius={aura.Radius:F2} fade={aura.Fade:F3}");
                 });
         }
     }

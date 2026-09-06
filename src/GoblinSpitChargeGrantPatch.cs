@@ -35,7 +35,7 @@ namespace rfmechanics
 
                 var cfg = RFMechanicsModSystem.Config;
                 if (cfg == null) return;
-                if (!cfg.EnableGoblinSpitCharges && !cfg.EnableGoblinRotFlies) return;
+                if (!cfg.EnableGoblinSpitCharges && !cfg.EnableGoblinRotFlies && !cfg.EnableGoblinRotAura) return;
 
                 // Mirrors tryEatStop's own completion gate -- a cancelled bite shouldn't grant a charge.
                 if (secondsUsed < 0.95f) return;
@@ -72,6 +72,8 @@ namespace rfmechanics
 
                 var cfg = RFMechanicsModSystem.Config;
                 if (cfg == null) return;
+
+                if (cfg.EnableGoblinRotAura) GoblinRotAuraState.EatRot(player, cfg);
 
                 if (cfg.EnableGoblinSpitCharges)
                 {

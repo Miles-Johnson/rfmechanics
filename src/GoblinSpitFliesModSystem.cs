@@ -5,292 +5,250 @@ using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.MathTools;
 
-namespace rfmechanics
+namespace rfmechanics;
+
+public class GoblinSpitFliesModSystem : ModSystem
 {
-    /// <summary>
-    /// Client-side ModSystem owning the spit fly renderer's lifecycle (Phase G4 Step 4).
-    /// </summary>
-    public class GoblinSpitFliesModSystem : ModSystem
+    private GoblinSpitFliesRenderer? renderer;
+    public override bool ShouldLoad(EnumAppSide side) => side == EnumAppSide.Client;
+    public override void StartClientSide(ICoreClientAPI api) => renderer = new GoblinSpitFliesRenderer(api);
+    public override void Dispose() { renderer?.Dispose(); base.Dispose(); }
+}
+
+/// <summary>One persistent original winged sprite per charge, independent of aura recovery.</summary>
+internal sealed class GoblinSpitFliesRenderer : IRenderer
+{
+    public double RenderOrder => 0.40;
+    public int RenderRange => 48;
+    private readonly ICoreClientAPI capi;
+    private readonly MeshRef mesh;
+    private readonly Matrixf matrix = new();
+    private readonly Random random = new();
+    private readonly Dictionary<long, Swarm> swarms = new();
+    private IShaderProgram? shader;
+    private int texture = -1;
+    private Vec3d? previousCamera;
+    private bool failed;
+
+    private sealed class Fly
     {
-        private GoblinSpitFliesRenderer? renderer;
+        public Vec3d Position = new(), Velocity = new(), Target = new();
+        public double Retarget, Clock, Phase, Speed;
+    }
 
-        public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
+    private sealed class Swarm
+    {
+        public Vec3d LastHome = new();
+        public int Dimension;
+        public readonly List<Fly> Flies = new();
+    }
 
-        public override void StartClientSide(ICoreClientAPI api)
+    internal GoblinSpitFliesRenderer(ICoreClientAPI api)
+    {
+        capi = api;
+        // Original crossed-quad model and original fly.png, including its tiny wings.
+        var data = new MeshData();
+        data.SetXyz(new float[] { -1,-1,0, 1,-1,0, 1,1,0, -1,1,0, 0,-1,1, 0,-1,-1, 0,1,-1, 0,1,1 });
+        data.SetUv(new float[] { 0,0, 1,0, 1,1, 0,1, 0,0, 1,0, 1,1, 0,1 });
+        data.SetVerticesCount(8);
+        data.SetIndices(new[] { 0,1,2, 0,2,3, 4,5,6, 4,6,7 });
+        data.SetIndicesCount(12);
+        mesh = api.Render.UploadMesh(data);
+        capi.Event.ReloadShader += LoadShader;
+        LoadShader();
+        capi.Event.RegisterRenderer(this, EnumRenderStage.Opaque, "rfspitflies");
+    }
+
+    private bool LoadShader()
+    {
+        shader?.Dispose();
+        shader = capi.Shader.NewShaderProgram();
+        shader.VertexShader = capi.Shader.NewShader(EnumShaderType.VertexShader);
+        shader.FragmentShader = capi.Shader.NewShader(EnumShaderType.FragmentShader);
+        shader.AssetDomain = "rfmechanics";
+        capi.Shader.RegisterFileShaderProgram("rfspitflies", shader);
+        return shader.Compile();
+    }
+
+    public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+    {
+        if (failed || shader == null) return;
+        try
         {
-            renderer = new GoblinSpitFliesRenderer(this, api);
+            var cfg = RFMechanicsModSystem.Config;
+            var self = capi.World.Player?.Entity;
+            if (cfg == null || self == null || capi.IsGamePaused || !float.IsFinite(deltaTime) || deltaTime <= 0) return;
+            if (!cfg.EnableGoblinSpitFlies) { swarms.Clear(); return; }
+            Vec3d origin = self.CameraPos;
+            Vec3d camera = GoblinFlyGeometry.Camera(origin, capi.Render.CameraMatrixOriginf);
+            Vec3d oldCamera = previousCamera ?? camera;
+            previousCamera = camera;
+            double dt = Math.Min(deltaTime, 0.1);
+            double size = Safe(cfg.GoblinSpitFliesSize, 0.06, 0.01, 0.25);
+            var seen = new HashSet<long>();
+            var draw = new List<Vec3d>();
+            foreach (EntityPlayer goblin in GoblinRotFliesShared.GetNearbyGoblins(capi, cfg, chargesOnly: true))
+            {
+                seen.Add(goblin.EntityId);
+                double height = Math.Clamp(goblin.CollisionBox?.Y2 ?? 0.9, 0.3, 3);
+                Vec3d home = goblin.Pos.XYZ.AddCopy(0, height * 0.6, 0);
+                double radius = Safe(cfg.GoblinSpitFliesRadius, 1.1, 0.4, 2);
+                double vertical = Math.Min(height * 0.4, Safe(cfg.GoblinSpitFliesVerticalExtent, 0.45, 0.1, 1));
+                if (!swarms.TryGetValue(goblin.EntityId, out Swarm? swarm)
+                    || swarm.Dimension != goblin.Pos.Dimension || home.SquareDistanceTo(swarm.LastHome) > 64)
+                {
+                    swarm = new Swarm { Dimension = goblin.Pos.Dimension };
+                    swarms[goblin.EntityId] = swarm;
+                }
+                swarm.LastHome = home;
+                int count = Math.Clamp(goblin.WatchedAttributes.GetInt("rfmechanics:spitCharges"), 0, 32);
+                // No lifetime, opacity animation, aura-level scaling or population thinning.
+                if (swarm.Flies.Count > count) swarm.Flies.RemoveRange(count, swarm.Flies.Count - count);
+                while (swarm.Flies.Count < count)
+                {
+                    var fly = new Fly { Phase = random.NextDouble() * Math.PI * 2 };
+                    fly.Position = ChooseTarget(home, radius, vertical, goblin, size);
+                    swarm.Flies.Add(fly);
+                }
+                foreach (Fly fly in swarm.Flies)
+                {
+                    Vec3d before = fly.Position;
+                    Move(fly, swarm, goblin, home, radius, vertical, size, dt, cfg);
+                    double clearance = Safe(cfg.GoblinRotFliesCameraClearance, 0.8, 0.5, 3) + size;
+                    // Geometry/camera occlusion only; never fade a charge to signal aura strength.
+                    if (GoblinFlyGeometry.CrossesCamera(before - oldCamera, fly.Position - camera, clearance)) continue;
+                    if (!Passable(fly.Position, goblin, size)) continue;
+                    draw.Add(fly.Position);
+                }
+            }
+            var stale = new List<long>();
+            foreach (long id in swarms.Keys) if (!seen.Contains(id)) stale.Add(id);
+            foreach (long id in stale) swarms.Remove(id);
+            Render(draw, origin, camera, (float)size);
         }
-
-        public override void Dispose()
+        catch (Exception ex)
         {
-            renderer?.Dispose();
-            base.Dispose();
+            failed = true;
+            capi.Logger.Error("[rfmechanics] Spit-charge fly renderer disabled: {0}", ex);
         }
     }
 
-    /// <summary>
-    /// Exact-count spit fly renderer: one instance per spit charge, 0-6, no floor or scaling.
-    /// Shape follows RiftRenderer (uploaded mesh, per-instance matrix, camera-facing by zeroing
-    /// the model matrix's rotation columns after multiplying in the camera matrix) but not its
-    /// shader -- that one samples the primary framebuffer for a screen-space distortion effect
-    /// this doesn't need. rfspitflies.vsh/.fsh are a plain textured-quad shader instead.
-    /// Registered at AfterBlit to match GoblinDarkvisionModSystem's convention for this mod's
-    /// client-only renderers.
-    /// Each fly is a crossed pair of quads (2026-08-22 tuning pass), not one -- a single quad
-    /// billboard, however well it faces the camera, still reads as a flat cutout because the
-    /// silhouette itself never changes with viewing angle; two quads at 90 degrees give it a
-    /// real cross-section, same technique vanilla uses for foliage sprites.
-    /// </summary>
-    internal class GoblinSpitFliesRenderer : IRenderer
+    private void Move(Fly fly, Swarm swarm, EntityPlayer goblin, Vec3d home, double radius,
+        double vertical, double size, double dt, RFMechanicsConfig cfg)
     {
-        public double RenderOrder => 0.05;
-        public int RenderRange => 100;
-
-        private readonly ModSystem ownerMod;
-        private readonly ICoreClientAPI capi;
-        private readonly MeshRef meshref;
-        private readonly Matrixf matrixf = new();
-        private IShaderProgram? prog;
-        private int flyTexId = -1;
-        private static bool loggedException = false;
-
-        private class SpitFlyInstance
+        fly.Clock += dt;
+        fly.Retarget -= dt;
+        double distance = fly.Position.DistanceTo(home);
+        if (fly.Retarget <= 0 || fly.Position.SquareDistanceTo(fly.Target) < 0.025 || distance > radius * 1.5)
         {
-            public Vec3d LocalOffset = new();
-            public Vec3d TargetOffset = new();
-            public double NextRetargetMs;
-            public float FadeT;
-            public bool Removing;
+            fly.Target = ChooseTarget(home, radius, vertical, goblin, size);
+            fly.Speed = Safe(cfg.GoblinSpitFliesSpeed, 2.2, 0.1, 5) * (0.65 + random.NextDouble() * 0.7);
+            fly.Retarget = Safe(cfg.GoblinSpitFliesRetargetSeconds, 0.6, 0.1, 5) * (0.75 + random.NextDouble() * 0.5);
         }
-
-        private readonly Dictionary<long, List<SpitFlyInstance>> instancesByGoblin = new();
-
-        public GoblinSpitFliesRenderer(ModSystem ownerMod, ICoreClientAPI capi)
+        Vec3d direction = fly.Target - fly.Position;
+        double length = direction.Length();
+        if (length > 0.001) direction *= 1 / length;
+        // Independent steering, mild lateral weaving and separation keep a readable swarm.
+        double weave = Math.Sin(fly.Clock * 2.0 + fly.Phase) * 0.22;
+        direction += new Vec3d(-direction.Z * weave, Math.Sin(fly.Clock * 1.6 + fly.Phase) * 0.12, direction.X * weave);
+        foreach (Fly other in swarm.Flies)
         {
-            this.ownerMod = ownerMod;
-            this.capi = capi;
-
-            MeshData mesh = BuildCrossedQuadMesh();
-            meshref = capi.Render.UploadMesh(mesh);
-
-            capi.Event.ReloadShader += LoadShader;
-            LoadShader();
-
-            capi.Event.RegisterRenderer(this, EnumRenderStage.AfterBlit, "rfspitflies");
+            if (ReferenceEquals(fly, other)) continue;
+            Vec3d away = fly.Position - other.Position;
+            double separation = away.Length();
+            if (separation > 0.001 && separation < 0.22) direction += away * ((0.22 - separation) / (0.22 * separation));
         }
-
-        /// <summary>Two quads sharing the same local origin and size: quad 1 in the local XY
-        /// plane (Z=0, QuadMeshUtil.GetQuad()'s own layout), quad 2 the same shape rotated 90
-        /// degrees about the local Y axis (X,Y,Z) -> (Z,Y,-X), landing in the local YZ plane
-        /// (X=0). Same vertex/uv layout the existing rfspitflies.vsh already expects (location 0
-        /// = position, location 1 = uv), so the shader needs no change.</summary>
-        private static MeshData BuildCrossedQuadMesh()
+        length = direction.Length();
+        if (length > 0.001) direction *= 1 / length;
+        // Catch up under locomotion by steering faster, never translating with the model.
+        double speed = Math.Min(6, fly.Speed + Math.Max(0, distance - radius * 1.5) * 2);
+        fly.Velocity += (direction * speed - fly.Velocity) * (1 - Math.Exp(-dt * 7));
+        // Small steps prevent tunnelling through a wall during catch-up or a slow frame.
+        int steps = Math.Max(1, (int)Math.Ceiling(fly.Velocity.Length() * dt / 0.04));
+        for (int step = 0; step < steps; step++)
         {
-            MeshData m = new MeshData();
-
-            float[] xyz =
-            {
-                -1, -1, 0,   1, -1, 0,   1, 1, 0,   -1, 1, 0,
-                0, -1, 1,    0, -1, -1,  0, 1, -1,   0, 1, 1,
-            };
-            m.SetXyz(xyz);
-
-            float[] uv =
-            {
-                0, 0,  1, 0,  1, 1,  0, 1,
-                0, 0,  1, 0,  1, 1,  0, 1,
-            };
-            m.SetUv(uv);
-
-            m.SetVerticesCount(8);
-            m.SetIndices(new[] { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 });
-            m.SetIndicesCount(12);
-            return m;
+            Vec3d next = fly.Position + fly.Velocity * (dt / steps);
+            if (Passable(next, goblin, size)) { fly.Position = next; continue; }
+            fly.Velocity *= -0.5;
+            fly.Retarget = 0;
+            break;
         }
+    }
 
-        private bool LoadShader()
+    private Vec3d ChooseTarget(Vec3d home, double radius, double vertical, EntityPlayer goblin, double size)
+    {
+        Vec3d result = home;
+        for (int attempt = 0; attempt < 16; attempt++)
         {
-            prog = capi.Shader.NewShaderProgram();
-            prog.VertexShader = capi.Shader.NewShader(EnumShaderType.VertexShader);
-            prog.FragmentShader = capi.Shader.NewShader(EnumShaderType.FragmentShader);
-            prog.AssetDomain = ownerMod.Mod.Info.ModID;
-            capi.Shader.RegisterFileShaderProgram("rfspitflies", prog);
-            return prog.Compile();
+            double angle = random.NextDouble() * Math.PI * 2;
+            double reach = radius * (0.6 + random.NextDouble() * 0.4);
+            result = home.AddCopy(Math.Cos(angle) * reach, (random.NextDouble() * 2 - 1) * vertical, Math.Sin(angle) * reach);
+            if (Passable(result, goblin, size)) return result;
         }
+        return result;
+    }
 
-        public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+    private bool Passable(Vec3d point, EntityPlayer goblin, double size)
+    {
+        Vec3d local = point - goblin.Pos.XYZ;
+        var box = goblin.CollisionBox;
+        if (box != null && local.X >= box.X1 - size && local.X <= box.X2 + size
+            && local.Y >= box.Y1 - size && local.Y <= box.Y2 + size
+            && local.Z >= box.Z1 - size && local.Z <= box.Z2 + size) return false;
+        var pos = new BlockPos((int)Math.Floor(point.X), (int)Math.Floor(point.Y), (int)Math.Floor(point.Z), goblin.Pos.Dimension);
+        var block = capi.World.BlockAccessor.GetBlock(pos);
+        return block.Id == 0 || block.GetCollisionBoxes(capi.World.BlockAccessor, pos)?.Length is not > 0;
+    }
+
+    private void Render(List<Vec3d> flies, Vec3d origin, Vec3d camera, float size)
+    {
+        if (flies.Count == 0 || shader == null) return;
+        texture = texture < 0 ? capi.Render.GetOrLoadTexture(new AssetLocation("rfmechanics", "entity/rotflies/fly.png")) : texture;
+        flies.Sort((a, b) => b.SquareDistanceTo(camera).CompareTo(a.SquareDistanceTo(camera)));
+        var render = capi.Render;
+        var previous = render.CurrentActiveShader;
+        previous?.Stop();
+        render.GLEnableDepthTest();
+        render.GLDepthMask(false);
+        render.GlToggleBlend(true);
+        try
         {
-            if (prog == null) return;
-
-            try
+            shader.Use();
+            shader.UniformMatrix("projectionMatrix", render.CurrentProjectionMatrix);
+            shader.BindTexture2D("tex2d", texture, 0);
+            shader.Uniform("rgbaTint", new Vec4f(1, 1, 1, 1));
+            shader.Uniform("opacity", 1f);
+            foreach (Vec3d point in flies)
             {
-                var cfg = RFMechanicsModSystem.Config;
-                if (cfg == null || !cfg.EnableGoblinSpitFlies) return;
-
-                if (flyTexId < 0)
-                {
-                    flyTexId = capi.Render.GetOrLoadTexture(new AssetLocation("rfmechanics", "entity/rotflies/fly.png"));
-                }
-
-                List<EntityPlayer> goblins = GoblinRotFliesShared.GetNearbyGoblins(capi, cfg);
-                var seenGoblinIds = new HashSet<long>();
-                double nowMs = capi.World.ElapsedMilliseconds;
-                Random rand = capi.World.Rand;
-                var plrPos = capi.World.Player.Entity.Pos;
-                var toDraw = new List<(double x, double y, double z, float fadeT)>();
-
-                float radius = (float)cfg.GoblinSpitFliesRadius;
-                float vExtent = (float)cfg.GoblinSpitFliesVerticalExtent;
-
-                foreach (EntityPlayer goblin in goblins)
-                {
-                    seenGoblinIds.Add(goblin.EntityId);
-
-                    // Polled every frame (not event-driven) so charges present at login/relog show immediately.
-                    int charges = GameMath.Clamp(goblin.WatchedAttributes.GetInt("rfmechanics:spitCharges", 0), 0, cfg.SpitChargeCap);
-
-                    if (!instancesByGoblin.TryGetValue(goblin.EntityId, out List<SpitFlyInstance>? instances))
-                    {
-                        instances = new List<SpitFlyInstance>();
-                        instancesByGoblin[goblin.EntityId] = instances;
-                    }
-
-                    while (instances.Count < charges)
-                    {
-                        // Spawn scaled outside the envelope so the lag+fade reads as "arriving", not "appearing".
-                        instances.Add(new SpitFlyInstance
-                        {
-                            NextRetargetMs = nowMs,
-                            LocalOffset = SampleUniformInCylinderVolume(rand, radius * 1.5, vExtent * 1.5)
-                        });
-                    }
-
-                    for (int i = 0; i < instances.Count; i++)
-                    {
-                        instances[i].Removing = i >= charges;
-                    }
-
-                    // Body midpoint, not chest: vertical envelope is symmetric around this point,
-                    // and its height above the feet is set equal to the half-extent itself, so a
-                    // ~1.8-block-tall goblin's envelope spans roughly floor to head.
-                    Vec3d bodyMidPos = goblin.Pos.XYZ;
-                    bodyMidPos.Y += vExtent;
-
-                    for (int i = instances.Count - 1; i >= 0; i--)
-                    {
-                        SpitFlyInstance inst = instances[i];
-
-                        if (nowMs >= inst.NextRetargetMs)
-                        {
-                            inst.TargetOffset = SampleUniformInCylinderVolume(rand, radius, vExtent);
-                            inst.NextRetargetMs = nowMs + cfg.GoblinSpitFliesRetargetSeconds * 1000.0;
-                        }
-
-                        double lagFrac = cfg.GoblinSpitFliesLagSeconds <= 0 ? 1.0 : GameMath.Clamp(deltaTime / cfg.GoblinSpitFliesLagSeconds, 0.0, 1.0);
-                        inst.LocalOffset += (inst.TargetOffset - inst.LocalOffset) * lagFrac;
-
-                        float fadeStep = cfg.GoblinSpitFliesFadeSeconds <= 0 ? 1f : deltaTime / (float)cfg.GoblinSpitFliesFadeSeconds;
-                        inst.FadeT = inst.Removing
-                            ? Math.Max(0f, inst.FadeT - fadeStep)
-                            : Math.Min(1f, inst.FadeT + fadeStep);
-
-                        if (inst.Removing && inst.FadeT <= 0f)
-                        {
-                            instances.RemoveAt(i);
-                            continue;
-                        }
-
-                        toDraw.Add((bodyMidPos.X + inst.LocalOffset.X, bodyMidPos.Y + inst.LocalOffset.Y, bodyMidPos.Z + inst.LocalOffset.Z, inst.FadeT));
-                    }
-                }
-
-                // Drop tracking for goblins that left the scan range so their instance lists don't leak.
-                if (instancesByGoblin.Count > seenGoblinIds.Count)
-                {
-                    var stale = new List<long>();
-                    foreach (long id in instancesByGoblin.Keys)
-                    {
-                        if (!seenGoblinIds.Contains(id)) stale.Add(id);
-                    }
-                    foreach (long id in stale) instancesByGoblin.Remove(id);
-                }
-
-                if (toDraw.Count == 0) return;
-
-                capi.Render.GlToggleBlend(true);
-                prog.Use();
-                prog.UniformMatrix("projectionMatrix", capi.Render.CurrentProjectionMatrix);
-                prog.BindTexture2D("tex2d", flyTexId, 0);
-                prog.Uniform("rgbaTint", new Vec4f(1f, 1f, 1f, 1f));
-
-                float size = (float)cfg.GoblinSpitFliesSize;
-                foreach (var (x, y, z, fadeT) in toDraw)
-                {
-                    RenderFly(x, y, z, plrPos.X, plrPos.Y, plrPos.Z, size, fadeT);
-                }
-
-                prog.Stop();
-                capi.Render.GlToggleBlend(false);
-            }
-            catch (Exception ex)
-            {
-                if (!loggedException)
-                {
-                    loggedException = true;
-                    capi.Logger?.Warning("[rfmechanics] Exception in GoblinSpitFliesRenderer: {0}", ex);
-                }
+                Vec3d p = point - origin;
+                matrix.Identity().Translate((float)p.X, (float)p.Y, (float)p.Z);
+                matrix.ReverseMul(render.CameraMatrixOriginf);
+                // Original spherical billboard orientation, preserving the crossed silhouette.
+                matrix.Values[0] = matrix.Values[5] = matrix.Values[10] = 1;
+                matrix.Values[1] = matrix.Values[2] = matrix.Values[4] = 0;
+                matrix.Values[6] = matrix.Values[8] = matrix.Values[9] = 0;
+                matrix.Scale(size / 2, size / 2, size / 2);
+                shader.UniformMatrix("modelViewMatrix", matrix.Values);
+                render.RenderMesh(mesh);
             }
         }
-
-        private void RenderFly(double x, double y, double z, double camX, double camY, double camZ, float size, float fadeT)
+        finally
         {
-            if (fadeT <= 0f || prog == null) return;
-
-            prog.Uniform("opacity", fadeT);
-
-            matrixf.Identity();
-            matrixf.Translate((float)(x - camX), (float)(y - camY), (float)(z - camZ));
-            matrixf.ReverseMul(capi.Render.CameraMatrixOriginf);
-
-            // Full spherical billboard: discard the camera-relative rotation entirely (all three
-            // columns reset to identity), keep only the translation. RiftRenderer itself only
-            // resets columns 0/2 (Values[0,1,2] and [8,9,10]) and leaves column 1 (up,
-            // Values[4,5,6]) inherited from the camera matrix -- that reads as a full billboard
-            // only because Vintage Story's camera never rolls in normal play, not because it
-            // actually is one. Resetting column 1 too removes that assumption.
-            matrixf.Values[0] = 1f;
-            matrixf.Values[1] = 0f;
-            matrixf.Values[2] = 0f;
-            matrixf.Values[4] = 0f;
-            matrixf.Values[5] = 1f;
-            matrixf.Values[6] = 0f;
-            matrixf.Values[8] = 0f;
-            matrixf.Values[9] = 0f;
-            matrixf.Values[10] = 1f;
-
-            matrixf.Scale(size / 2f, size / 2f, size / 2f);
-
-            prog.UniformMatrix("modelViewMatrix", matrixf.Values);
-            capi.Render.RenderMesh(meshref);
+            shader.Stop();
+            render.GLDepthMask(true);
+            render.GlToggleBlend(false);
+            previous?.Use();
         }
+    }
 
-        /// <summary>Uniform sample through the cylinder volume (sqrt(rand) for horizontal-disk
-        /// area uniformity, plain uniform on the vertical axis) -- through the volume, not on a
-        /// shell, per the 2026-08-22 tuning pass.</summary>
-        private static Vec3d SampleUniformInCylinderVolume(Random rand, double radius, double vExtent)
-        {
-            double angle = rand.NextDouble() * 2.0 * Math.PI;
-            double horizDist = radius * Math.Sqrt(rand.NextDouble());
-            double y = (rand.NextDouble() * 2.0 - 1.0) * vExtent;
-            return new Vec3d(Math.Cos(angle) * horizDist, y, Math.Sin(angle) * horizDist);
-        }
+    private static double Safe(double value, double fallback, double min, double max) => GoblinAuraMath.FiniteClamp(value, fallback, min, max);
 
-        public void Dispose()
-        {
-            capi.Event.UnregisterRenderer(this, EnumRenderStage.AfterBlit);
-            capi.Event.ReloadShader -= LoadShader;
-            meshref?.Dispose();
-            prog?.Dispose();
-        }
+    public void Dispose()
+    {
+        capi.Event.UnregisterRenderer(this, EnumRenderStage.Opaque);
+        capi.Event.ReloadShader -= LoadShader;
+        swarms.Clear();
+        mesh.Dispose();
+        shader?.Dispose();
     }
 }

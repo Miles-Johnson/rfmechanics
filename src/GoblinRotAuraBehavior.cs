@@ -32,30 +32,53 @@ namespace rfmechanics
             if (entity.World.Side != EnumAppSide.Server) return;
 
             var cfg = RFMechanicsModSystem.Config;
-            if (cfg == null || !cfg.EnableGoblinRotAura) return;
+            if (cfg == null) return;
+            if (!cfg.EnableGoblinRotAura)
+            {
+                GoblinRotAuraRegistry.ClearSource(entity.EntityId);
+                GoblinRotAuraState.Publish(entity, default);
+                return;
+            }
 
             accum += deltaTime;
             if (accum < cfg.GoblinRotAuraTickInterval) return;
             accum = 0f;
 
-            if (!IsGoblin())
+            Refresh(sweep: true);
+        }
+
+        internal void Refresh(bool sweep = false)
+        {
+            var cfg = RFMechanicsModSystem.Config;
+            if (entity.World.Side != EnumAppSide.Server || cfg == null) return;
+            if (!cfg.EnableGoblinRotAura || !entity.Alive || !IsGoblin())
+            {
+                GoblinRotAuraRegistry.ClearSource(entity.EntityId);
+                GoblinRotAuraState.Publish(entity, default);
+                return;
+            }
+
+            GoblinRotAuraState.Migrate(entity, cfg);
+            GoblinAuraShape shape = GoblinRotAuraState.Read(entity, cfg);
+            GoblinRotAuraState.Publish(entity, shape);
+            if (!shape.Active)
             {
                 GoblinRotAuraRegistry.ClearSource(entity.EntityId);
                 return;
             }
 
-            float t = GameMath.Clamp(ReadLiveRotIntake(entity, cfg), 0f, 1f);
-            (int radius, float intensity) = ComputeShape(cfg, t);
-
             var source = new AuraSource
             {
                 Pos = entity.Pos.AsBlockPos,
-                Radius = radius,
-                VerticalHalfExtent = cfg.GoblinRotAuraVerticalHalfExtent,
-                Intensity = intensity,
+                Center = entity.Pos.XYZ,
+                Radius = shape.Radius,
+                VerticalHalfExtent = shape.VerticalHalfExtent,
+                Intensity = shape.Intensity,
+                Fade = shape.Fade,
                 UpdatedMs = entity.World.ElapsedMilliseconds
             };
             GoblinRotAuraRegistry.SetSource(entity.EntityId, source);
+            if (!sweep) return;
 
             // Logs every sweep (not a spam risk -- already throttled per-goblin) so real
             // wall-clock cost under real load, with multiple goblins online, can be verified.
@@ -76,33 +99,6 @@ namespace rfmechanics
             base.OnEntityDespawn(despawnData);
         }
 
-        /// <summary>
-        /// Cross-mod contract: reads dietsetup's "dietsetup:intake:rot" /
-        /// "dietsetup:intake:rot:updatedHours" WatchedAttributes keys directly, no assembly
-        /// reference to dietsetup. Decays live using the same exponential half-life formula
-        /// dietsetup uses on write -- GoblinRotAuraIntakeHalfLifeHours must be kept in sync with
-        /// dietsetup's own IntakeHalfLifeHours["rot"].
-        /// </summary>
-        internal static float ReadLiveRotIntake(Entity entity, RFMechanicsConfig cfg)
-        {
-            var wa = entity.WatchedAttributes;
-            double nowHours = entity.World.Calendar.TotalHours;
-            double lastHours = wa.GetDouble("dietsetup:intake:rot:updatedHours", nowHours);
-            double raw = wa.GetDouble("dietsetup:intake:rot", 0.0);
-            double elapsed = Math.Max(0.0, nowHours - lastHours);
-            return (float)(raw * Math.Pow(0.5, elapsed / cfg.GoblinRotAuraIntakeHalfLifeHours));
-        }
-
-        /// <summary>intensity = totalOutputConstant / radius^2, so "total spoilage output stays
-        /// roughly constant" as radius grows is structural, not tuned (rounding of radius is the only source of "roughly").</summary>
-        internal static (int radius, float intensity) ComputeShape(RFMechanicsConfig cfg, float t)
-        {
-            int radius = (int)Math.Round(GameMath.Lerp(cfg.GoblinRotAuraRadiusMin, cfg.GoblinRotAuraRadiusMax, t));
-            double totalOutputConstant = cfg.GoblinRotAuraRadiusMin * cfg.GoblinRotAuraRadiusMin * cfg.GoblinRotAuraIntensityAtMinRadius;
-            float intensity = (float)(totalOutputConstant / Math.Max(1, radius * radius));
-            return (radius, intensity);
-        }
-
         private bool IsGoblin()
         {
             var cfg = RFMechanicsModSystem.Config;
@@ -116,8 +112,9 @@ namespace rfmechanics
         /// <summary>Falloff logic lives in GoblinRotAuraRegistry.SpatialFalloff so this sweep's geometry and the crop-stunt gate can never drift apart.</summary>
         private void SweepContainers(AuraSource src, RFMechanicsConfig cfg)
         {
-            BlockPos min = src.Pos.AddCopy(-src.Radius, -src.VerticalHalfExtent, -src.Radius);
-            BlockPos max = src.Pos.AddCopy(src.Radius, src.VerticalHalfExtent, src.Radius);
+            int reach = (int)Math.Ceiling(src.Radius);
+            BlockPos min = src.Pos.AddCopy(-reach, -src.VerticalHalfExtent, -reach);
+            BlockPos max = src.Pos.AddCopy(reach, src.VerticalHalfExtent, reach);
 
             entity.World.BlockAccessor.WalkBlocks(min, max, (block, x, y, z) =>
             {
@@ -208,8 +205,9 @@ namespace rfmechanics
         {
             if (!cfg.EnableGoblinRotAuraCarriedInventory) return;
 
-            BlockPos min = src.Pos.AddCopy(-src.Radius, -src.VerticalHalfExtent, -src.Radius);
-            BlockPos max = src.Pos.AddCopy(src.Radius, src.VerticalHalfExtent, src.Radius);
+            int reach = (int)Math.Ceiling(src.Radius);
+            BlockPos min = src.Pos.AddCopy(-reach, -src.VerticalHalfExtent, -reach);
+            BlockPos max = src.Pos.AddCopy(reach + 1, src.VerticalHalfExtent + 1, reach + 1);
 
             // GetEntitiesInsideCuboid's matches delegate isn't documented as call-once, so no side effects belong inside it.
             Entity[] nearbyPlayers = entity.World.GetEntitiesInsideCuboid(min, max, e => e is EntityPlayer);
@@ -218,7 +216,7 @@ namespace rfmechanics
             {
                 var targetPlayer = (EntityPlayer)e;
 
-                float spatialFalloff = GoblinRotAuraRegistry.SpatialFalloff(src, targetPlayer.Pos.AsBlockPos);
+                float spatialFalloff = GoblinRotAuraRegistry.SpatialFalloff(src, targetPlayer.Pos.XYZ, targetPlayer.Pos.Dimension);
                 if (spatialFalloff <= 0f) continue;
 
                 IPlayer iplayer = targetPlayer.Player;
@@ -235,20 +233,12 @@ namespace rfmechanics
                 IInventory backpackEquip = iplayer.InventoryManager.GetOwnInventory(GlobalConstants.backpackInvClassName);
                 if (backpackEquip == null) continue;
 
-                ItemSlot[] bagSlots = backpackEquip.ToArray();
-                // ReloadBagInventory is a full deserialize of every worn bag; skip it when nothing's equipped (the common case).
-                if (bagSlots.All(s => s.Empty)) continue;
-
-                var bagInv = new BagInventory(entity.Api, bagSlots);
-                var dummyParent = new InventoryGeneric(entity.Api);
-                bagInv.ReloadBagInventory(dummyParent, bagSlots);
-
-                AccelerateSlots(bagInv, spatialFalloff, src.Intensity, sealedMod, cfg, slot =>
-                {
-                    var bagContentSlot = (ItemSlotBagContent)slot;
-                    bagInv.SaveSlotIntoBag(bagContentSlot);        // persists into the bag stack's own tree
-                    bagSlots[bagContentSlot.BagIndex].MarkDirty(); // dirties the real equip slot for save/sync
-                });
+                // The player's backpack inventory already exposes its live content slots.
+                // Marking a content slot saves it into its bag and syncs that slot. Marking
+                // the worn bag instead reloads the inventory, broadcasts player data and
+                // rebuilds the player mesh every sweep (visible as an animation twitch).
+                AccelerateSlots(backpackEquip.Where(slot => slot is ItemSlotBagContent),
+                    spatialFalloff, src.Intensity, sealedMod, cfg, slot => slot.MarkDirty());
             }
         }
     }

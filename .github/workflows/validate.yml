@@ -1,0 +1,16 @@
+name: Source validation
+on:
+  push:
+    branches: [dev, 'release/**']
+  pull_request:
+    branches: [dev]
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate metadata and packaging scripts
+        shell: powershell
+        run: .\Validate.ps1

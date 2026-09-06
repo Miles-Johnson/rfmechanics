@@ -105,27 +105,55 @@ namespace rfmechanics
             return true;
         }
 
-        /// <summary>Separate command (not a /rfflies subcommand) and client-side, not
-        /// server-side: every value here only feeds client-only renderers (GoblinAuraFliesModSystem,
-        /// GoblinSpitFliesRenderer). A server-registered chat command shadows any client-registered
-        /// command of the same name (the client resolves locally first), so a client-only tuning
-        /// knob under the /rfflies name would either never fire or would swallow /rfflies'
-        /// server-side diagnostic dump -- distinct names sidestep that entirely. Four subcommands
-        /// (2026-08-22 tuning pass, up from the original single aura-lag value) so the whole spit
-        /// fly envelope can be tuned in one session without a rebuild.</summary>
+        /// <summary>Client-side fly tuning; distinct command name keeps server diagnostics reachable.</summary>
         private void RegisterFliesLagCommand(ICoreClientAPI api)
         {
             CommandArgumentParsers parsers = api.ChatCommands.Parsers;
 
             api.ChatCommands.Create("rfflieslag")
-                .WithDescription("Live-tune Phase G4 fly rendering values. Client-side only, not persisted.")
+                .WithDescription("Live-tune world-space flies. Client-side only, not persisted.")
+                .BeginSubCommand("sizeaura")
+                    .WithDescription("Aura fly size in blocks (0.01-0.25, default 0.035).")
+                    .WithArgs(parsers.OptionalFloat("blocks"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesSize", () => Config?.GoblinRotFliesSize, v => Config!.GoblinRotFliesSize = v))
+                .EndSubCommand()
+                .BeginSubCommand("speed")
+                    .WithDescription("Independent fly drift in blocks/second (0-2, default 0.12).")
+                    .WithArgs(parsers.OptionalFloat("speed"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesSpeed", () => Config?.GoblinRotFliesSpeed, v => Config!.GoblinRotFliesSpeed = v))
+                .EndSubCommand()
+                .BeginSubCommand("speedspit")
+                    .WithDescription("Charge fly cruise speed (0.1-5 blocks/second, default 2.2), independent of aura flies.")
+                    .WithArgs(parsers.OptionalFloat("speed"))
+                    .HandleWith(args => TuneFloat(args, "GoblinSpitFliesSpeed", () => Config?.GoblinSpitFliesSpeed, v => Config!.GoblinSpitFliesSpeed = v))
+                .EndSubCommand()
+                .BeginSubCommand("trail")
+                    .WithDescription("Retired following control; flies now stay in world space.")
+                    .WithArgs(parsers.OptionalFloat("blocks"))
+                    .HandleWith(args => TextCommandResult.Success("Aura flies stay in world space. Use .rfflieslag life to tune their lifetime. Charge flies use independent steering."))
+                .EndSubCommand()
                 .BeginSubCommand("aura")
-                    .WithDescription("Get/set GoblinRotFliesLagSeconds (aura fly cloud centroid lag, seconds).")
+                    .WithDescription("Retired following control; flies now stay in world space.")
                     .WithArgs(parsers.OptionalFloat("seconds"))
-                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesLagSeconds", () => Config?.GoblinRotFliesLagSeconds, v => Config!.GoblinRotFliesLagSeconds = v))
+                    .HandleWith(args => TextCommandResult.Success("Aura flies stay in world space. Use .rfflieslag life to tune their lifetime. Charge flies use independent steering."))
+                .EndSubCommand()
+                .BeginSubCommand("life")
+                    .WithDescription("Mean lifetime in seconds (0.5-5, default 2), with staggered fade in/out.")
+                    .WithArgs(parsers.OptionalFloat("seconds"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesLifeSeconds", () => Config?.GoblinRotFliesLifeSeconds, v => Config!.GoblinRotFliesLifeSeconds = v))
+                .EndSubCommand()
+                .BeginSubCommand("opacitymin")
+                    .WithDescription("Fly opacity at the smallest active aura (0-1, default 0.2).")
+                    .WithArgs(parsers.OptionalFloat("opacity"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesOpacityMin", () => Config?.GoblinRotFliesOpacityMin, v => Config!.GoblinRotFliesOpacityMin = v))
+                .EndSubCommand()
+                .BeginSubCommand("opacitymax")
+                    .WithDescription("Fly opacity at the largest aura (0-1, default 0.65).")
+                    .WithArgs(parsers.OptionalFloat("opacity"))
+                    .HandleWith(args => TuneFloat(args, "GoblinRotFliesOpacityMax", () => Config?.GoblinRotFliesOpacityMax, v => Config!.GoblinRotFliesOpacityMax = v))
                 .EndSubCommand()
                 .BeginSubCommand("size")
-                    .WithDescription("Get/set GoblinSpitFliesSize (spit fly quad size, blocks).")
+                    .WithDescription("Original winged charge-sprite width in blocks (0.01-0.25, default 0.06).")
                     .WithArgs(parsers.OptionalFloat("blocks"))
                     .HandleWith(args => TuneFloat(args, "GoblinSpitFliesSize", () => Config?.GoblinSpitFliesSize, v => Config!.GoblinSpitFliesSize = v))
                 .EndSubCommand()
@@ -141,7 +169,7 @@ namespace rfmechanics
                 .EndSubCommand();
         }
 
-        /// <summary>Shared get/set body for /rfflieslag's four subcommands -- one implementation
+        /// <summary>Shared get/set body for /rfflieslag's tuning subcommands -- one implementation
         /// instead of four near-identical HandleWith blocks.</summary>
         private static TextCommandResult TuneFloat(TextCommandCallingArgs args, string fieldName, Func<double?> get, Action<double> set)
         {
@@ -153,6 +181,21 @@ namespace rfmechanics
                 return TextCommandResult.Success(string.Format("{0}={1:F3}", fieldName, current.Value));
 
             double value = (float)args[0];
+            if (!double.IsFinite(value) || value < 0) return TextCommandResult.Error("Use a finite non-negative number.");
+            (double min, double max) = fieldName switch
+            {
+                "GoblinRotFliesSize" or "GoblinSpitFliesSize" => (0.01, 0.25),
+                "GoblinRotFliesSpeed" => (0, 2),
+                "GoblinSpitFliesSpeed" => (0.1, 5),
+                "GoblinRotFliesLifeSeconds" => (0.5, 5),
+                "GoblinRotFliesOpacityMin" or "GoblinRotFliesOpacityMax" => (0, 1),
+                "GoblinRotFliesMaxTrailBlocks" => (0, 3),
+                "GoblinSpitFliesRadius" => (0.4, 2),
+                "GoblinSpitFliesVerticalExtent" => (0.1, 1),
+                _ => (0, 5)
+            };
+            if (value < min - 0.000001 || value > max + 0.000001) return TextCommandResult.Error($"Use a value between {min} and {max}.");
+            value = Math.Clamp(value, min, max);
             set(value);
             return TextCommandResult.Success(string.Format("{0} set to {1:F3} (this session only, not saved to rfmechanics.json)", fieldName, value));
         }
@@ -185,6 +228,7 @@ namespace rfmechanics
             // Static zoom state has no per-entity despawn hook that fires on client disconnect
             // (EnumDespawnReason.Disconnect means "last player left the server", not this).
             RFElfZoomBehavior.ResetStaticState();
+            GoblinRotAuraRegistry.ClearAll();
 
             base.Dispose();
         }
@@ -208,6 +252,10 @@ namespace rfmechanics
             }
 
             config = loaded ?? new RFMechanicsConfig();
+            if (config.MigrateGoblinAura())
+                api.Logger.Notification("[rfmechanics] Migrated goblin visuals revision 3: independent persistent winged spit-charge flies; aura recovery retained.");
+            if (config.MigrateSmellVisuals())
+                api.Logger.Notification("[rfmechanics] Migrated smell visuals to revision 2: walking/full focus, acquisition 4.5-13.5s, stronger body-size contrast, yellow-green fallback.");
 
             if (!malformed)
             {
@@ -608,125 +656,30 @@ namespace rfmechanics
                 .EndSubCommand();
         }
 
-        /// <summary>Rot aura diagnostics: raw dietsetup rot-intake, elapsed hours since last
-        /// dietsetup write, the live decayed value, and the resulting radius/intensity -- confirms the intake-&gt;shape mapping without eating rotten food and waiting to see it change.</summary>
+        /// <summary>Read the server aura state and calendar-day recovery for the caller.</summary>
         private void RegisterRotAuraDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfrotdiag")
-                .WithDescription("Dump goblin rot aura diagnostics (rot-intake, decay, resulting radius/intensity) for the calling player")
+                .WithDescription("Show literal-rot aura radius, recovery and fly targets for the calling player.")
                 .RequiresPrivilege(Privilege.chat)
-                .HandleWith(args =>
-                {
-                    IPlayer player = args.Caller.Player;
-                    if (player == null)
-                        return TextCommandResult.Success("No player context.");
-
-                    var cfg = Config;
-                    if (cfg == null)
-                        return TextCommandResult.Success("Config not loaded.");
-
-                    Entity entity = player.Entity;
-                    var wa = entity.WatchedAttributes;
-                    double nowHours = entity.World.Calendar.TotalHours;
-                    double lastHours = wa.GetDouble("dietsetup:intake:rot:updatedHours", nowHours);
-                    double raw = wa.GetDouble("dietsetup:intake:rot", 0.0);
-                    double elapsedHours = Math.Max(0.0, nowHours - lastHours);
-
-                    float t = GoblinRotAuraBehavior.ReadLiveRotIntake(entity, cfg);
-                    (int radius, float intensity) = GoblinRotAuraBehavior.ComputeShape(cfg, GameMath.Clamp(t, 0f, 1f));
-
-                    string msg = string.Format(
-                        "rawRotIntake={0:F4} elapsedHoursSinceWrite={1:F2} liveDecayedIntake={2:F4} -> radius={3} intensity={4:F4} (RadiusMin={5} RadiusMax={6} halfLifeHours={7:F1})",
-                        raw, elapsedHours, t, radius, intensity, cfg.GoblinRotAuraRadiusMin, cfg.GoblinRotAuraRadiusMax, cfg.GoblinRotAuraIntakeHalfLifeHours);
-
-                    return TextCommandResult.Success(msg);
-                });
+                .HandleWith(args => Config == null ? TextCommandResult.Error("Config not loaded.")
+                    : TextCommandResult.Success(GoblinAuraCommands.Describe(args.Caller.Player, Config)));
         }
 
-        /// <summary>Fly diagnostics (Phase G4): a goblin can't judge his own visible fly cloud
-        /// well, so he needs the numbers directly -- rotFlies (raw/live), rotIntake (live), spit
-        /// charges, and the resulting aura/spit fly counts + aura radius, all for the calling
-        /// player. Server-side (same convention as /rfrotdiag) since it only reads
-        /// WatchedAttributes, no client-only state involved.</summary>
+        /// <summary>Report aura and charge targets; the renderer may cull flies near the camera.</summary>
         private void RegisterFliesDiagCommand(ICoreServerAPI api)
         {
             api.ChatCommands.Create("rfflies")
-                .WithDescription("Dump goblin fly diagnostics (rotFlies, rotIntake, spit charges, resulting fly counts/radius) for the calling player")
+                .WithDescription("Show literal-rot aura radius, recovery and fly targets for the calling player.")
                 .RequiresPrivilege(Privilege.chat)
-                .HandleWith(args =>
-                {
-                    IPlayer player = args.Caller.Player;
-                    if (player == null)
-                        return TextCommandResult.Success("No player context.");
-
-                    var cfg = Config;
-                    if (cfg == null)
-                        return TextCommandResult.Success("Config not loaded.");
-
-                    Entity entity = player.Entity;
-                    var wa = entity.WatchedAttributes;
-
-                    double rotFliesRaw = wa.GetDouble("rfmechanics:rotFlies", 0.0);
-                    float rotFliesLive = GameMath.Clamp(GoblinRotFliesShared.ReadLiveRotFlies(entity, cfg), 0f, (float)cfg.GoblinRotFliesCap);
-                    float rotIntakeLive = GameMath.Clamp(GoblinRotAuraBehavior.ReadLiveRotIntake(entity, cfg), 0f, 1f);
-                    int spitCharges = wa.GetInt("rfmechanics:spitCharges", 0);
-
-                    int auraCount = (int)Math.Round(GameMath.Lerp(cfg.GoblinRotFliesCountMin, cfg.GoblinRotFliesCountMax, rotFliesLive / (float)cfg.GoblinRotFliesCap));
-                    (int auraRadius, _) = GoblinRotAuraBehavior.ComputeShape(cfg, rotIntakeLive);
-                    int spitFlyCount = GameMath.Clamp(spitCharges, 0, cfg.SpitChargeCap);
-
-                    string msg = string.Format(
-                        "rotFliesRaw={0:F4} rotFliesLive={1:F4} rotIntakeLive={2:F4} spitCharges={3} -> auraFlyCount={4} auraRadius={5} spitFlyCount={6}",
-                        rotFliesRaw, rotFliesLive, rotIntakeLive, spitCharges, auraCount, auraRadius, spitFlyCount);
-
-                    return TextCommandResult.Success(msg);
-                });
+                .HandleWith(args => Config == null ? TextCommandResult.Error("Config not loaded.")
+                    : TextCommandResult.Success(GoblinAuraCommands.Describe(args.Caller.Player, Config)));
         }
 
-        /// <summary>Testing tools for the rot aura. Neither subcommand touches rot-aura game
-        /// logic: "registry" reads GoblinRotAuraRegistry's live state; "timescale" wraps vanilla's
-        /// IGameCalendar.CalendarSpeedMul so the calendar-hour-driven crop-growth and rot-intake-
-        /// decay checks (otherwise real-time-slow) can be observed quickly. Spoilage acceleration
-        /// itself is NOT calendar-gated (runs on the real-seconds sweep throttle), so it doesn't need this dial.</summary>
+        /// <summary>Register radius, off, age, registry and legacy world-timescale test commands.</summary>
         private void RegisterRotAuraDebugCommand(ICoreServerAPI api)
         {
-            CommandArgumentParsers parsers = api.ChatCommands.Parsers;
-
-            api.ChatCommands.Create("rfrotaura")
-                .WithDescription("Rot aura testing tools: live registry dump, and a calendar-speed dial so crop-growth/rot-intake-decay tests don't need real-time waiting.")
-                .RequiresPrivilege(Privilege.root)
-                .BeginSubCommand("registry")
-                    .WithDescription("Dump every currently registered AuraSource (entityId, position, radius/intensity, age).")
-                    .HandleWith(args =>
-                    {
-                        if (GoblinRotAuraRegistry.AllSources.Count == 0)
-                            return TextCommandResult.Success("No active AuraSource entries.");
-
-                        long nowMs = api.World.ElapsedMilliseconds;
-                        var lines = new System.Collections.Generic.List<string>();
-                        foreach (var kv in GoblinRotAuraRegistry.AllSources)
-                        {
-                            AuraSource src = kv.Value;
-                            lines.Add(string.Format(
-                                "entityId={0} pos=({1},{2},{3}) radius={4} vExtent={5} intensity={6:F4} ageMs={7}",
-                                kv.Key, src.Pos.X, src.Pos.Y, src.Pos.Z, src.Radius, src.VerticalHalfExtent, src.Intensity, nowMs - src.UpdatedMs));
-                        }
-                        return TextCommandResult.Success(string.Join("\n", lines));
-                    })
-                .EndSubCommand()
-                .BeginSubCommand("timescale")
-                    .WithDescription("Get/set world.Calendar.CalendarSpeedMul (vanilla, default 0.5). Higher = faster in-game days = faster crop-growth-check and rot-intake-decay testing. Remember to set it back afterward -- this affects the whole server, not just testing.")
-                    .WithArgs(parsers.OptionalFloat("mul"))
-                    .HandleWith(args =>
-                    {
-                        if (args.Parsers[0].IsMissing)
-                            return TextCommandResult.Success(string.Format("CalendarSpeedMul={0:F2} (vanilla default 0.5)", api.World.Calendar.CalendarSpeedMul));
-
-                        float mul = (float)args[0];
-                        api.World.Calendar.CalendarSpeedMul = mul;
-                        return TextCommandResult.Success(string.Format("CalendarSpeedMul set to {0:F2}. Remember to set it back to 0.5 (vanilla default) when done testing.", mul));
-                    })
-                .EndSubCommand();
+            GoblinAuraCommands.Register(api);
         }
 
         /// <summary>Registered server-side only: EntityBehaviorHunger and entity.Attributes

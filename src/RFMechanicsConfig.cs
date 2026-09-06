@@ -654,9 +654,44 @@ public class RFMechanicsConfig
     /// radius scans (BlockVicinityCondition, EntityBehaviorBodyTemperature).</summary>
     public double GoblinRotAuraTickInterval { get; set; } = 2.0;
 
-    /// <summary>Horizontal radius floor -- the max-intensity end of Task 4's intake-driven
-    /// range (rot-starved goblins: narrow and intense).</summary>
-    public int GoblinRotAuraRadiusMin { get; set; } = 4;
+    /// <summary>Minimum active horizontal radius. Zero aura is an explicit state, not a radius-floor setting.</summary>
+    public int GoblinRotAuraRadiusMin { get; set; } = 1;
+
+    /// <summary>Literal rot adds this fraction of the 1-15 block radius range per completed bite.</summary>
+    public double GoblinRotAuraPerRot { get; set; } = 0.15;
+    public double GoblinRotAuraNarrowAfterDays { get; set; } = 2.0;
+    public double GoblinRotAuraClearAfterDays { get; set; } = 3.0;
+
+    /// <summary>One-time migration of known pre-abstention defaults, preserving custom values.</summary>
+    public int GoblinAuraRevision { get; set; }
+
+    internal bool MigrateGoblinAura()
+    {
+        if (GoblinAuraRevision >= 3) return false;
+        if (GoblinAuraRevision < 1)
+        {
+            if (GoblinRotAuraRadiusMin == 4) GoblinRotAuraRadiusMin = 1;
+            if (GoblinRotFliesCountMin == 10) GoblinRotFliesCountMin = 12;
+            if (GoblinRotFliesCountMax == 150) GoblinRotFliesCountMax = 64;
+            if (GoblinRotFliesSize == 0.08) GoblinRotFliesSize = 0.09;
+            if (GoblinRotFliesLagSeconds == 2.0) GoblinRotFliesLagSeconds = 0.65;
+            if (GoblinSpitFliesSize == 0.075 || GoblinSpitFliesSize == 0.15) GoblinSpitFliesSize = 0.12;
+            if (GoblinSpitFliesRadius == 4.5) GoblinSpitFliesRadius = 0.8;
+            if (GoblinSpitFliesRetargetSeconds == 0.3 || GoblinSpitFliesRetargetSeconds == 2.0) GoblinSpitFliesRetargetSeconds = 1.8;
+        }
+        // Apply the playtest size/drift correction to known defaults only.
+        if (GoblinAuraRevision < 2)
+        {
+            if (GoblinRotFliesSize == 0.09) GoblinRotFliesSize = 0.035;
+            if (GoblinSpitFliesSize == 0.12) GoblinSpitFliesSize = 0.045;
+            if (GoblinRotFliesSpeed == 0.65) GoblinRotFliesSpeed = 0.12;
+        }
+        if (GoblinSpitFliesSize == 0.045) GoblinSpitFliesSize = 0.06;
+        if (GoblinSpitFliesRadius == 0.8) GoblinSpitFliesRadius = 1.1;
+        if (GoblinSpitFliesRetargetSeconds == 1.8) GoblinSpitFliesRetargetSeconds = 0.6;
+        GoblinAuraRevision = 3;
+        return true;
+    }
 
     /// <summary>Horizontal radius ceiling -- the wide/rot-fed end of Task 4's range, and the
     /// approved sweep-cost cap (~6,700 positions/sweep at the matching VerticalHalfExtent).</summary>
@@ -666,9 +701,7 @@ public class RFMechanicsConfig
     /// a full cube -- most of the horizontal reach without the Y-axis cost.</summary>
     public int GoblinRotAuraVerticalHalfExtent { get; set; } = 3;
 
-    /// <summary>Intensity anchor at GoblinRotAuraRadiusMin (Task 4's narrow/intense end).
-    /// Intensity at other radii is derived, not independently configured -- see Task 4's
-    /// radius^2*intensity-constant mapping.</summary>
+    /// <summary>Potency ceiling. Wide radii retain the historical 16/radius-squared scaling; narrow radii are capped.</summary>
     public double GoblinRotAuraIntensityAtMinRadius { get; set; } = 1.0;
 
     /// <summary>DEPRECATED: replaced by GoblinRotAuraRateMultiplier. This was an absolute
@@ -722,10 +755,7 @@ public class RFMechanicsConfig
     /// that crop's growth check.</summary>
     public double CropStuntMinStrength { get; set; } = 0.15;
 
-    /// <summary>Decay half-life (in-game calendar hours) used to decay dietsetup's rot-intake
-    /// accumulator live on read. MUST match dietsetup's own IntakeHalfLifeHours["rot"]
-    /// (DietSetupConfig.cs) -- a documented cross-reference, not independently tunable, since
-    /// rfmechanics has no assembly reference to dietsetup to read the value directly.</summary>
+    /// <summary>Legacy setting retained for config compatibility. DietSetup intake no longer controls the aura.</summary>
     public double GoblinRotAuraIntakeHalfLifeHours { get; set; } = 48.0;
 
     /// <summary>Master toggle for letting goblins eat game:rot (grants it a minimal
@@ -767,89 +797,79 @@ public class RFMechanicsConfig
 
     // ── Goblin rot flies (Phase G4) ──
 
-    /// <summary>Master toggle for the rotFlies signal write (GoblinSpitChargeGrantPatch) and the
-    /// vanilla-particle aura fly population it drives.</summary>
+    /// <summary>Enable the ambient voxel fly population. Does not disable aura consumption or gameplay effects.</summary>
     public bool EnableGoblinRotFlies { get; set; } = true;
 
-    /// <summary>Master toggle for the exact-count spit fly renderer.</summary>
+    /// <summary>One persistent winged fly per spit charge, independent of aura activity.</summary>
     public bool EnableGoblinSpitFlies { get; set; } = true;
 
-    /// <summary>Decay half-life (in-game calendar hours) for rfmechanics:rotFlies. Matched to
-    /// GoblinRotAuraIntakeHalfLifeHours (48h, 2026-08-23) so flies don't decay to near-zero
-    /// while the invisible dietsetup:rotIntake aura is still near full -- the signal itself
-    /// stays distinct (still driven by GoblinSpitChargeGrantPatch.GrantRotFlies).</summary>
+    /// <summary>Legacy literal-rot fly history half-life; used by the retained compatibility credit writer, not current visuals.</summary>
     public double GoblinRotFliesHalfLifeHours { get; set; } = 48.0;
 
-    /// <summary>rfmechanics:rotFlies gained per qualifying game:rot eat, same gate as spit
-    /// charges. 3 rots (0.34*3 ~= 1.02) fills both the spit charge cap and this signal --
-    /// intended, not coincidental.</summary>
+    /// <summary>Legacy fly-history credit per literal rot. Current aura gain is GoblinRotAuraPerRot.</summary>
     public double GoblinRotFliesPerRot { get; set; } = 0.34;
 
-    /// <summary>Ceiling on rfmechanics:rotFlies. Raised 1.0 -> 5.0 (2026-08-23) alongside the
-    /// half-life match above -- at 48h, historical eating persists far longer, so the old cap
-    /// saturated a heavy-eater and a light-eater goblin at the same fly count. TUNING: not locked.</summary>
+    /// <summary>Legacy fly-history cap, also used to normalize old saves during one-time aura migration.</summary>
     public double GoblinRotFliesCap { get; set; } = 5.0;
 
-    /// <summary>Aura fly count at rotFlies == 0 (still nonzero -- a goblin who hasn't eaten rot
-    /// recently isn't fly-free, just sparse).</summary>
-    public int GoblinRotFliesCountMin { get; set; } = 10;
+    /// <summary>Ambient fly target at the one-block stage, scaled down during the final recovery day.</summary>
+    public int GoblinRotFliesCountMin { get; set; } = 12;
 
-    /// <summary>Aura fly count at rotFlies == 1 (cap).</summary>
-    public int GoblinRotFliesCountMax { get; set; } = 150;
+    /// <summary>Ambient fly target at maximum aura level, before camera/distance/global budget culling.</summary>
+    public int GoblinRotFliesCountMax { get; set; } = 64;
 
-    /// <summary>Below this rotFlies value, the aura fly population stops spawning entirely
-    /// rather than trailing off to an unreadable handful.</summary>
+    /// <summary>Legacy particle floor retained for config compatibility. Current presence follows the server aura snapshot.</summary>
     public double GoblinRotFliesFloor { get; set; } = 0.02;
 
-    /// <summary>Aura fly quad size, in blocks.</summary>
-    public double GoblinRotFliesSize { get; set; } = 0.08;
+    /// <summary>Voxel aura fly body width in blocks, close to More Bugs' ordinary fly scale.</summary>
+    public double GoblinRotFliesSize { get; set; } = 0.035;
 
-    /// <summary>Period, in seconds, of the slow sine that breathes the aura fly spawn radius.</summary>
+    /// <summary>Independent world-space drift in blocks/second; no inherited player velocity.</summary>
+    public double GoblinRotFliesSpeed { get; set; } = 0.12;
+    public double GoblinRotFliesOpacityMin { get; set; } = 0.2;
+    public double GoblinRotFliesOpacityMax { get; set; } = 0.65;
+    /// <summary>Legacy orbit/centroid settings, unused by world-space flies.</summary>
+    public double GoblinRotFliesTurnSeconds { get; set; } = 1.8;
+    /// <summary>Legacy following-distance setting, unused by world-space flies.</summary>
+    public double GoblinRotFliesMaxTrailBlocks { get; set; } = 1.5;
+    public double GoblinRotFliesCameraClearance { get; set; } = 0.8;
+    public int GoblinRotFliesRenderCap { get; set; } = 256;
+
+    /// <summary>Legacy particle breathing period, unused by the persistent voxel renderer.</summary>
     public double GoblinRotFliesBreathPeriod { get; set; } = 20.0;
 
-    /// <summary>Amplitude of the breathing sine, as a fraction of the nominal spawn radius.</summary>
+    /// <summary>Legacy particle breathing amplitude, unused by the persistent voxel renderer.</summary>
     public double GoblinRotFliesBreathAmplitude { get; set; } = 0.10;
 
-    /// <summary>Time constant, in seconds, for the aura fly cloud's centroid to lag a moving
-    /// goblin. Exposed as a live-tunable via /rfflies for in-game feel tuning.</summary>
-    public double GoblinRotFliesLagSeconds { get; set; } = 2.0;
+    /// <summary>Legacy following time constant, unused by world-space flies.</summary>
+    public double GoblinRotFliesLagSeconds { get; set; } = 0.65;
 
-    /// <summary>Aura fly particle lifetime, in seconds.</summary>
+    /// <summary>Mean fly lifetime in seconds, individually varied by +/-25 percent with smooth fades.</summary>
     public double GoblinRotFliesLifeSeconds { get; set; } = 2.0;
 
     /// <summary>Range, in blocks, for both fly populations' goblin scan (Step 5) -- shared so aura
     /// and spit flies iterate the same goblin set.</summary>
     public double GoblinRotFliesRange { get; set; } = 32.0;
 
-    /// <summary>Spit fly quad size, in blocks. Halved from the original 0.15 (2026-08-22 tuning
-    /// pass) -- the original read oversized once the crossed-quad mesh gave the flies real
-    /// silhouette instead of a flat cutout.</summary>
-    public double GoblinSpitFliesSize { get; set; } = 0.075;
+    /// <summary>Full width of the original winged sprite quad. Visible body/wings occupy part of that width.</summary>
+    public double GoblinSpitFliesSize { get; set; } = 0.06;
 
-    /// <summary>Spit fly cloud horizontal radius, in blocks, centred on the goblin's body
-    /// midpoint. Set to match More Bugs' RotPlayerFlyRoamRadiusBlocks default (2026-08-22) --
-    /// the reference point the user asked for is the "carrying rot in inventory" fly cloud
-    /// from that mod, not a from-scratch feel.</summary>
-    public double GoblinSpitFliesRadius { get; set; } = 4.5;
+    /// <summary>Charge fly cruise speed, varied 0.65-1.35x per maneuver; independent of ambient drift.</summary>
+    public double GoblinSpitFliesSpeed { get; set; } = 2.2;
 
-    /// <summary>Spit fly cloud vertical half-extent, in blocks, around the goblin's body
-    /// midpoint. Set to match More Bugs' RotPlayerFlyVerticalRangeBlocks default (2026-08-22),
-    /// same rationale as GoblinSpitFliesRadius.</summary>
+    /// <summary>Close-body flight target radius, independent of the aura radius.</summary>
+    public double GoblinSpitFliesRadius { get; set; } = 1.1;
+
+    /// <summary>Maximum charge-fly vertical range, also limited by the actual goblin body height.</summary>
     public double GoblinSpitFliesVerticalExtent { get; set; } = 0.45;
 
-    /// <summary>Spit fly retarget interval, in seconds. Slowed 0.3 -> 2.0 (2026-08-22 tuning
-    /// pass) to match the aura population's pace -- vanilla's own RandomVelocityChange jitter
-    /// (traced in the decompiled ParticleGeneric.cs) resets on roughly a 2s cadence, so this
-    /// keeps both populations reading as the same kind of insect rather than the spit flies
-    /// darting.</summary>
-    public double GoblinSpitFliesRetargetSeconds { get; set; } = 2.0;
+    /// <summary>Average interval between independent charge-fly course changes.</summary>
+    public double GoblinSpitFliesRetargetSeconds { get; set; } = 0.6;
 
-    /// <summary>Time constant, in seconds, for the spit fly cloud centroid to lag the goblin.
-    /// Tight (&lt;=1.0s) by design -- these are a body-relative indicator, not ambient atmosphere.</summary>
+    /// <summary>Legacy separate charge-cloud lag, unused by world-space flies.</summary>
     public double GoblinSpitFliesLagSeconds { get; set; } = 1.0;
 
-    /// <summary>Fade-in/fade-out duration, in seconds, when a spit fly spawns or despawns on a
-    /// charge count change. Instant appearance reads as a bug at this render distance.</summary>
+    /// <summary>Legacy setting: charge flies no longer fade in/out.</summary>
     public double GoblinSpitFliesFadeSeconds { get; set; } = 0.4;
 
     // ── Elf leaf gathering (Phase G2) ──
@@ -990,52 +1010,69 @@ public class RFMechanicsConfig
     /// <summary>Jet length in blocks once fully blown out into a cloud.</summary>
     public double SmellJetLengthNear { get; set; } = 6;
 
-    /// <summary>Dead-zone radius in blocks at the player's face -- both the nearest a particle
-    /// can spawn and its designed fade-out target (a particle's lifetime is capped to the
-    /// travel time from its spawn point to this radius, so opacity reaches zero right as it
-    /// arrives). Raised 1.5 -> 3.0 (2026-08-23) after particles were observed visibly passing
-    /// through the player, then 3.0 -> 3.5 (same day) as a belt-and-suspenders margin once the
-    /// actual root cause was fixed: EmitJet's particle velocity now includes the player's own
-    /// motion (see OrcSmellModSystem.EmitJet), so a moving player no longer invalidates the
-    /// spawn-time trajectory this radius assumes.</summary>
-    public double SmellJetInnerRadius { get; set; } = 3.5;
+    /// <summary>Nearest spawn distance; arrival/body exclusion is independent of this.</summary>
+    public double SmellJetInnerRadius { get; set; } = 2.0;
 
-    /// <summary>Jet cross-section thickness in degrees per unit of collision_w.</summary>
+    /// <summary>Camera exclusion radius; body bounds and particle extent can stop wisps earlier.</summary>
+    public double SmellArrivalRadius { get; set; } = 0.65;
+
+    /// <summary>Amplitude of gentle sideways/vertical drift, tapered near arrival.</summary>
+    public double SmellSwayAmplitude { get; set; } = 0.15;
+
+    /// <summary>Versioned visual tuning migration. Revision 2 adds walking/slow full focus and body-size contrast.</summary>
+    public int SmellVisualRevision { get; set; } = 0;
+
+    internal bool MigrateSmellVisuals()
+    {
+        if (SmellVisualRevision >= 2) return false;
+        if (SmellVisualRevision < 1)
+        {
+            SmellDriftSpeed = 1.2;
+            SmellParticleLifeSec = 3.0;
+            SmellJetInnerRadius = 2.0;
+            SmellFocusReleaseMs = 200;
+            SmellPassiveEnabled = false;
+        }
+        SmellFocusEngageMs = 9000;
+        SmellParticleFadeInStartMs = 4500;
+        SmellParticleFadeInFullMs = 13500;
+        SmellParticleSizeBase = -0.04;
+        SmellParticleSizePerSize = 0.20;
+        SmellParticleSizeMin = 0.045;
+        SmellParticleSizeMax = 0.32;
+        SmellParticleCountFactorBase = 0.2;
+        SmellParticleCountFactorPerSize = 0.65;
+        SmellColorUnknown = new[] { 190, 225, 130 };
+        SmellVisualRevision = 2;
+        return true;
+    }
+
+    /// <summary>Exponent on equivalent body dimension (cube root of width squared times height).</summary>
+    public double SmellVisualSizeExponent { get; set; } = 1.5;
+    /// <summary>Fraction of full detection range while walking/starting focus.</summary>
+    public double SmellWalkingRangeScale { get; set; } = 0.4;
+    /// <summary>Maximum eyes-closed weight while walking.</summary>
+    public double SmellWalkingVisionWeight { get; set; } = 0.25;
+    /// <summary>Movement faster than this (blocks/sec) interrupts sniffing, as do sprint/jump inputs.</summary>
+    public double SmellWalkingMaxSpeed { get; set; } = 3.0;
+
+    /// <summary>Jet cross-section thickness in degrees per unit of shaped body size.</summary>
     public double SmellThicknessDegPerSize { get; set; } = 8;
 
-    /// <summary>Particle quad size in blocks at collision_w == 0 -- a hypothetical extrapolation
-    /// point, not a real creature (chicken, the smallest vanilla land fauna, is 0.5). Negative
-    /// by design: solved together with SmellParticleSizePerSize so the formula lands exactly on
-    /// SmellParticleSizeMin at collision_w 0.5 (chicken) and SmellParticleSizeMax at 1.6 (bear,
-    /// polar male, the largest vanilla land fauna) -- chicken is the intended visual floor, not
-    /// an arbitrary clamp catching sizes that never occur. TUNING: not locked.</summary>
-    public double SmellParticleSizeBase { get; set; } = -0.05;
+    /// <summary>Particle width = base + per-size * BodyScale, clamped below.</summary>
+    public double SmellParticleSizeBase { get; set; } = -0.04;
+    public double SmellParticleSizePerSize { get; set; } = 0.20;
+    public double SmellParticleSizeMin { get; set; } = 0.045;
+    public double SmellParticleSizeMax { get; set; } = 0.32;
 
-    /// <summary>Additional particle quad size in blocks per unit of collision_w -- a bear's
-    /// scent jet reads as visibly coarser than a chicken's, same idea as
-    /// SmellThicknessDegPerSize but for the individual particle instead of the jet's spread.
-    /// See SmellParticleSizeBase for how this and the Min/Max clamps were solved together.
-    /// TUNING: not locked.</summary>
-    public double SmellParticleSizePerSize { get; set; } = 0.22;
-
-    /// <summary>Clamp floor on the size-scaled particle quad -- lands exactly at chicken's
-    /// collision_w (0.5), the smallest vanilla land fauna, so chicken is the visual floor by
-    /// construction, not an arbitrary illegible-speck guard.</summary>
-    public double SmellParticleSizeMin { get; set; } = 0.06;
-
-    /// <summary>Clamp ceiling on the size-scaled particle quad -- lands exactly at bear polar
-    /// male's collision_w (1.6), the largest vanilla land fauna, so nothing vanilla ever
-    /// actually clamps here; it exists for modded megafauna bigger than any vanilla creature.</summary>
-    public double SmellParticleSizeMax { get; set; } = 0.30;
-
-    /// <summary>Particle count multiplier at collision_w == 0, same base+per-size convention as
+    /// <summary>Particle count multiplier at zero shaped body size, same base+per-size convention as
     /// SmellParticleSizeBase -- applied on top of the distance-based falloff so small prey read
     /// sparser than large prey at every distance, not just up close. TUNING: not locked.</summary>
-    public double SmellParticleCountFactorBase { get; set; } = 0.5;
+    public double SmellParticleCountFactorBase { get; set; } = 0.2;
 
-    /// <summary>Additional particle count multiplier per unit of collision_w. TUNING: not
+    /// <summary>Additional particle count multiplier per unit of shaped body size. TUNING: not
     /// locked.</summary>
-    public double SmellParticleCountFactorPerSize { get; set; } = 0.4;
+    public double SmellParticleCountFactorPerSize { get; set; } = 0.65;
 
     /// <summary>Clamp floor on the size-scaled particle count multiplier.</summary>
     public double SmellParticleCountFactorMin { get; set; } = 0.3;
@@ -1059,30 +1096,28 @@ public class RFMechanicsConfig
     /// SmellParticlesFar and SmellParticlesNear.</summary>
     public double SmellFalloffExponent { get; set; } = 1.0;
 
-    /// <summary>Hard cap on particles spawned for a single source in one tick, applied after
+    /// <summary>Particle budget per detection interval for one source, applied after
     /// spread-density scaling.</summary>
     public int SmellMaxParticlesPerSource { get; set; } = 90;
 
-    /// <summary>Hard cap on particles spawned across all sources combined in one tick.</summary>
+    /// <summary>Particle budget per detection interval across sources; emissions are distributed over 50-ms ticks.</summary>
     public int SmellMaxParticles { get; set; } = 400;
 
     /// <summary>Max sources emitted per tick. A frame-budget cap, not a legibility choice --
     /// six-plus overlapping jets is intended, not a bug.</summary>
     public int SmellMaxSources { get; set; } = 6;
 
-    /// <summary>Inward drift speed in blocks/sec, toward the player's horizontal position.</summary>
-    public double SmellDriftSpeed { get; set; } = 4.0;
+    /// <summary>Inward drift speed in real blocks/sec, converging toward the eyes with near-arrival easing.</summary>
+    public double SmellDriftSpeed { get; set; } = 1.2;
 
-    /// <summary>Particle lifetime in seconds.</summary>
-    public double SmellParticleLifeSec { get; set; } = 1.2;
+    /// <summary>Managed particle lifetime in real seconds, independent of calendar speed.</summary>
+    public double SmellParticleLifeSec { get; set; } = 3.0;
 
-    /// <summary>If true, jets emit continuously without holding the focus hotkey.</summary>
+    /// <summary>Legacy setting retained for config compatibility; holding the ability key is always required.</summary>
     public bool SmellPassiveEnabled { get; set; } = false;
 
-    /// <summary>Milliseconds for the focus fog weight to ramp in on hotkey press. Deliberately
-    /// slow (5s) -- the darkening is meant to read as a gradual sensory shift, not an instant
-    /// toggle.</summary>
-    public int SmellFocusEngageMs { get; set; } = 5000;
+    /// <summary>Milliseconds of stillness for fully closed eyes; walking is capped at SmellWalkingVisionWeight.</summary>
+    public int SmellFocusEngageMs { get; set; } = 9000;
 
     /// <summary>Milliseconds for the focus fog weight to ramp back out on hotkey release.</summary>
     public int SmellFocusReleaseMs { get; set; } = 200;
@@ -1090,13 +1125,13 @@ public class RFMechanicsConfig
     /// <summary>Fog density value applied at full focus weight.</summary>
     public double SmellFocusFogDensity { get; set; } = 0.25;
 
-    /// <summary>Milliseconds the hotkey must be continuously held before smell particles start
-    /// appearing at all. Keyed off hold duration (OrcSmellShared.HeldMs), independent of the
+    /// <summary>Milliseconds of eligible stationary focus before smell particles start
+    /// appearing. Keyed off concentration duration (OrcSmellShared.HeldMs), independent of the
     /// fog ramp -- the world darkens first, the smell sense kicks in after.</summary>
-    public int SmellParticleFadeInStartMs { get; set; } = 3000;
+    public int SmellParticleFadeInStartMs { get; set; } = 4500;
 
     /// <summary>Milliseconds held at which smell particles reach full opacity.</summary>
-    public int SmellParticleFadeInFullMs { get; set; } = 6000;
+    public int SmellParticleFadeInFullMs { get; set; } = 13500;
 
     /// <summary>Jet RGB for sources classified Predator (CreatureDiet includes Protein, no plant categories).</summary>
     public int[] SmellColorPredator { get; set; } = new[] { 229, 57, 53 };

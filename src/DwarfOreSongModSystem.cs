@@ -28,6 +28,7 @@ namespace rfmechanics
     public class DwarfOreSongModSystem : ModSystem
     {
         private const string LastTriggerKey = "rfmechanics:oreSongLastMs";
+        private ICoreClientAPI? capi;
 
         public Dictionary<int, OreSongEntry> Lookup { get; } = new Dictionary<int, OreSongEntry>();
 
@@ -36,7 +37,22 @@ namespace rfmechanics
         public override void StartClientSide(ICoreClientAPI api)
         {
             base.StartClientSide(api);
-            BuildLookup(api);
+            capi = api;
+            // Multiplayer block definitions have not arrived at StartClientSide yet.
+            api.Event.BlockTexturesLoaded += OnBlockTexturesLoaded;
+        }
+
+        private void OnBlockTexturesLoaded()
+        {
+            if (capi != null) BuildLookup(capi);
+        }
+
+        public override void Dispose()
+        {
+            if (capi != null) capi.Event.BlockTexturesLoaded -= OnBlockTexturesLoaded;
+            capi = null;
+            Lookup.Clear();
+            base.Dispose();
         }
 
         /// <summary>Moved here from the old right-click-on-rock BlockBehavior -- same cooldown
@@ -208,6 +224,8 @@ namespace rfmechanics
 
         private void BuildLookup(ICoreClientAPI api)
         {
+            // A repeated load must replace the previous world's block IDs.
+            Lookup.Clear();
             var loggedUnmapped = new HashSet<string>();
 
             foreach (Block block in api.World.Blocks)
