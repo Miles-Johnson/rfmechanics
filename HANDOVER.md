@@ -1,8 +1,8 @@
 # rfmechanics — handover (as of 2026-09-06)
 
 **Orc Band/Frenzy jump bonus zero-out, Frenzy debt to per-game-hour, Puff Burn/loss states,
-Goblin final-item grant fix, trait guards (2026-09-06), built, not yet deployed or confirmed
-in-game.** `JumpHeightMulDelta` (`OrcBandTriple`) and `FrenzyMaxJumpBonus`
+Goblin final-item grant fix, trait guards (2026-09-06), built and deployed to the live install
+(`tools/deploy-all.ps1`, commit `92b9e19`), not yet confirmed in-game.** `JumpHeightMulDelta` (`OrcBandTriple`) and `FrenzyMaxJumpBonus`
 zeroed in `RFMechanicsConfig.cs` — both the coded default and the hand-edited live
 `ModConfig/rfmechanics.json`, since a successfully-parsed config always keeps its stored value
 over a new code default (same precedent as the `SmellParticlesFar`/`GoblinSpitFliesRadius`
@@ -45,9 +45,11 @@ blanket stockpiling block.
 Build: `dotnet build -c Release`, rfmechanics 0 errors/35 warnings, dietsetup 0/0 — same
 warning baseline, no new warnings from this change. Validated first in a standalone harness (90
 assertions: 62 compiled-code/API checks, 28 clock/state source-snippet checks) before touching
-the live install. **Not yet deployed or confirmed in-game** — particle appearance (colors/states
-4-5) and the zeroed jump feel are playtest-only checks, and this entry predates the
-`tools/deploy-all.ps1` run that follows it.
+the live install. Deployed via `tools/deploy-all.ps1`, live DLL confirmed rebuilt (byte size and
+timestamp both changed) and the hand-edited `ModConfig/rfmechanics.json` values (jump bonuses
+zero, `FrenzyDebtPerGameHour` 0.60, the `Puff*` block) confirmed still present post-deploy.
+**Not yet confirmed in-game** — particle appearance (colors/states 4-5) and the zeroed jump feel
+are playtest-only checks.
 
 ---
 
