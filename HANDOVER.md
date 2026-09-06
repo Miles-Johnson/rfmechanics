@@ -1,8 +1,9 @@
 # rfmechanics — handover (as of 2026-09-06)
 
 **Orc Band/Frenzy jump bonus zero-out, Frenzy debt to per-game-hour, Puff Burn/loss states,
-Goblin final-item grant fix, trait guards (2026-09-06), built and deployed to the live install
-(`tools/deploy-all.ps1`, commit `92b9e19`), not yet confirmed in-game.** `JumpHeightMulDelta` (`OrcBandTriple`) and `FrenzyMaxJumpBonus`
+Goblin final-item grant fix, trait guards (2026-09-06), built, deployed to the live install and
+pushed to the suhosting.net test server (commit `98ca18b`), not yet confirmed in-game.**
+`JumpHeightMulDelta` (`OrcBandTriple`) and `FrenzyMaxJumpBonus`
 zeroed in `RFMechanicsConfig.cs` — both the coded default and the hand-edited live
 `ModConfig/rfmechanics.json`, since a successfully-parsed config always keeps its stored value
 over a new code default (same precedent as the `SmellParticlesFar`/`GoblinSpitFliesRadius`
@@ -48,8 +49,14 @@ assertions: 62 compiled-code/API checks, 28 clock/state source-snippet checks) b
 the live install. Deployed via `tools/deploy-all.ps1`, live DLL confirmed rebuilt (byte size and
 timestamp both changed) and the hand-edited `ModConfig/rfmechanics.json` values (jump bonuses
 zero, `FrenzyDebtPerGameHour` 0.60, the `Puff*` block) confirmed still present post-deploy.
-**Not yet confirmed in-game** — particle appearance (colors/states 4-5) and the zeroed jump feel
-are playtest-only checks.
+Also pushed via `tools/deploy.ps1` to the suhosting.net test server (a required rebuild first,
+since the doc-only follow-up commit `98ca18b` moved HEAD past the artifact `deploy-all.ps1` had
+stamped) — build-freshness check passed, byte sizes verified, restart log confirms `[rfmechanics]
+Build 0.1.2-test.1 (98ca18b)` and `[dietsetup] Build 1.0.1-test.2 (1fbb13a)`. Restart log also
+surfaced one pre-existing, unrelated error worth a look some session: `Patch 14 in
+rfmechanics:patches/goblin-crop-stunt.json: File game:blocktypes/plant/crop/bellpepper.json not
+found` — nothing this session touched crop-stunt or bellpepper. **Not yet confirmed in-game** —
+particle appearance (colors/states 4-5) and the zeroed jump feel are playtest-only checks.
 
 ---
 
