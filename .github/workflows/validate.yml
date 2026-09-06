@@ -1,5 +1,6 @@
 name: Source validation
 on:
+  workflow_dispatch:
   push:
     branches: [dev, 'release/**']
   pull_request:
