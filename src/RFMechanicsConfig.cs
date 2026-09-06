@@ -294,6 +294,38 @@ public class RFMechanicsConfig
     /// bursts scales with state, never the burst size. TUNING: not locked.</summary>
     public double PuffParticleCount { get; set; } = 10.0;
 
+    /// <summary>Client particle-listener cadence, in milliseconds; does not change the server's state-publication cadence.</summary>
+    public int PuffTickIntervalMs { get; set; } = 100;
+
+    /// <summary>Real seconds between bursts for active Burn (state 4) and net Thew loss (state 5).</summary>
+    public double PuffIntervalBurning { get; set; } = 0.35;
+    public double PuffIntervalLosing { get; set; } = 0.75;
+
+    /// <summary>Base particle lifetime and additional random lifetime, in real seconds.</summary>
+    public double PuffLifeSeconds { get; set; } = 1.8;
+    public double PuffLifeVariationSeconds { get; set; } = 0.6;
+    public double PuffMinSize { get; set; } = 0.20;
+    public double PuffMaxSize { get; set; } = 0.40;
+    public double PuffSizeGrowth { get; set; } = 1.0;
+
+    /// <summary>Initial alpha (0..255), faded to zero over the lifetime; RGB colors by visual state.</summary>
+    public int PuffOpacity { get; set; } = 80;
+    public int[] PuffSteamColorRgb { get; set; } = new[] { 190, 205, 210 };
+    public int[] PuffSmokeColorRgb { get; set; } = new[] { 100, 95, 90 };
+    public int[] PuffBurnColorRgb { get; set; } = new[] { 150, 130, 110 };
+
+    public double PuffGravityEffect { get; set; } = 0.0;
+    public double PuffRiseSpeedMin { get; set; } = 0.25;
+    public double PuffRiseSpeedMax { get; set; } = 0.50;
+    public double PuffHorizontalSpeed { get; set; } = 0.08;
+
+    /// <summary>Full spawn-box extents in blocks, centered horizontally on the player.</summary>
+    public double PuffHorizontalSpread { get; set; } = 0.45;
+    public double PuffVerticalSpread { get; set; } = 0.30;
+    public double PuffSpawnHeightEyeFraction { get; set; } = 0.65;
+    public bool PuffWindAffected { get; set; } = true;
+    public double PuffWindAffectedness { get; set; } = 0.20;
+
     // ── Bands (Orc, Phase 3) ──
 
     /// <summary>Master toggle for the Band mechanic (state machine, entitySize, and stat
@@ -377,14 +409,9 @@ public class RFMechanicsConfig
     /// 1.0 has zero effect -- a reduction is not achievable through this stat without a Harmony patch on PModuleOnGround.DoApply. Not implemented speculatively.</summary>
     public double BulkyJumpHeightReduction_UNWIRED { get; set; } = 0.20;
 
-    /// <summary>Per-band delta on "jumpHeightMul" (delta units, same convention as
-    /// WalkSpeedDelta -- base stat entry is already 1.0, so blended == 1 + delta). Unlike the
-    /// Bulky reduction above, an increase passes straight through PModuleOnGround's
-    /// MathF.Max(1f, blended) floor with no patch needed -- jump height itself is proportional
-    /// to blended (velocity is scaled by sqrt(blended), height by velocity^2). Lean 3x base
-    /// (delta +2.0), Standard 2x base (delta +1.0), Bulky left at 0 (unchanged, matching the
-    /// reduction above staying unimplemented).</summary>
-    public OrcBandTriple JumpHeightMulDelta { get; set; } = new OrcBandTriple { Lean = 2.0, Standard = 1.0, Bulky = 0.0 };
+    /// <summary>Per-band delta on "jumpHeightMul". Zero deltas preserve vanilla jumping while
+    /// retaining the reversible config surface (blended == 1 + sum of source deltas).</summary>
+    public OrcBandTriple JumpHeightMulDelta { get; set; } = new OrcBandTriple { Lean = 0.0, Standard = 0.0, Bulky = 0.0 };
 
     /// <summary>NOT WIRED -- reserved config surface only. "KnockbackResistance" lives on the
     /// shared per-entity-TYPE EntityProperties object, not a per-player Stats category; setting
@@ -460,19 +487,21 @@ public class RFMechanicsConfig
     /// the curve's peak (satFrac -&gt; 0), scaled by curveMult at every point below the gate.</summary>
     public double FrenzyMaxSpeedBonus { get; set; } = 0.25;
 
-    /// <summary>jumpHeightMul delta (Stats.Set-delta units, matching JumpHeightMulDelta's
-    /// convention -- base stat entry is already 1.0, so blended == 1 + sum of every source's
-    /// delta) at the curve's peak, same scaling as FrenzyMaxSpeedBonus.</summary>
-    public double FrenzyMaxJumpBonus { get; set; } = 1.0;
+    /// <summary>Peak jumpHeightMul delta, scaled by the Frenzy curve. Zero preserves vanilla
+    /// jumping while retaining the reversible config surface.</summary>
+    public double FrenzyMaxJumpBonus { get; set; } = 0.0;
 
     /// <summary>satFrac below which Frenzy's bonus starts incurring FrenzyDebt. Above this
     /// threshold (but still under FrenzySatietyGate) the bonus is free.</summary>
     public double FrenzyDebtSatietyThreshold { get; set; } = 0.25;
 
-    /// <summary>Thew debt incurred per second at the curve's peak, only while satFrac is below
-    /// FrenzyDebtSatietyThreshold (added to FrenzyDebt, not subtracted from Thew directly -- see
-    /// DebtDrainPerHour). TUNING: not locked.</summary>
+    /// <summary>DORMANT: retained for installed-config compatibility only. This old real-second
+    /// key must not be interpreted as an hourly rate; use FrenzyDebtPerGameHour instead.</summary>
     public double FrenzyThewPerSecond { get; set; } = 0.005;
+
+    /// <summary>Debt per in-game hour at the curve's peak below FrenzyDebtSatietyThreshold.
+    /// Matches the old 0.005/real-second peak at 120 real seconds per game hour.</summary>
+    public double FrenzyDebtPerGameHour { get; set; } = 0.60;
 
     /// <summary>Interval, in milliseconds, of Frenzy's fast game-tick listener, registered
     /// unconditionally in Initialize (Frenzy is passive, no start/stop). Mirrors BurnFastTickMs

@@ -23,6 +23,7 @@ namespace rfmechanics
         private const string StatSource = "rf-orc-frenzy";
 
         private long fastListenerId = -1;
+        private double lastElapsedHours = double.NaN;
 
         // Write-cache of the last values actually pushed via Stats.Set, so ties aren't rewritten.
         private float lastWalkSpeedDelta;
@@ -53,6 +54,21 @@ namespace rfmechanics
         private void FastTick(float deltaTime)
         {
             if (entity.World.Side != EnumAppSide.Server) return;
+
+            // Sample before every eligibility return so inactive time never becomes a later bill.
+            // A failed sample breaks the chain; the next valid sample is a fresh baseline.
+            double nowElapsedHours = entity.World.Calendar.ElapsedHours;
+            double elapsedGameHours = 0.0;
+            if (double.IsFinite(nowElapsedHours))
+            {
+                if (double.IsFinite(lastElapsedHours))
+                {
+                    double elapsed = nowElapsedHours - lastElapsedHours;
+                    if (double.IsFinite(elapsed) && elapsed > 0.0) elapsedGameHours = elapsed;
+                }
+                lastElapsedHours = nowElapsedHours;
+            }
+            else lastElapsedHours = double.NaN;
 
             var cfg = RFMechanicsModSystem.Config;
             if (cfg == null || !cfg.EnableFrenzy || !cfg.EnableThew || !entity.Alive || !IsOrc())
@@ -88,7 +104,7 @@ namespace rfmechanics
 
             if (satFrac < (float)cfg.FrenzyDebtSatietyThreshold)
             {
-                float debtIncurred = (float)cfg.FrenzyThewPerSecond * curveMult * deltaTime;
+                float debtIncurred = (float)(cfg.FrenzyDebtPerGameHour * curveMult * elapsedGameHours);
                 if (debtIncurred > 0f) thewBhv.FrenzyDebt += debtIncurred;
             }
 

@@ -26,7 +26,7 @@ namespace rfmechanics
         public const string LastFoodCategoryKey = "rf-orc-last-food-category";
 
         /// <summary>Client-visible (WatchedAttributes) puff-cue state: 0 idle, 1 gaining, 2 light
-        /// debt, 3 heavy debt. Public so OrcPuffModSystem reads the same key without duplicating
+        /// debt, 3 heavy debt, 4 actively burning, 5 net Thew loss. Public so OrcPuffModSystem reads the same key without duplicating
         /// the string. Written only on change -- see OnGameTick's puff-state step.</summary>
         public const string StateAttributeKey = "rf-orc-state";
 
@@ -122,6 +122,8 @@ namespace rfmechanics
             float satFrac = hunger.Saturation / hunger.MaxSaturation;
             var band = entity.GetBehavior<BandBehavior>()?.CurrentBand ?? BandBehavior.Band.Lean;
 
+            float thewBeforeTick = Thew;
+
             if (hunger.Saturation <= 0f)
             {
                 Thew -= (float)cfg.ThewDecayStarvingPerHour * hourFraction;
@@ -165,8 +167,10 @@ namespace rfmechanics
             {
                 float debtAfterDrain = BurnDebt + FrenzyDebt;
                 int state;
-                if (debtAfterDrain > (float)cfg.HeavyDebtThreshold) state = 3;
+                if (entity.GetBehavior<BurnBehavior>()?.Burning == true) state = 4;
+                else if (debtAfterDrain > (float)cfg.HeavyDebtThreshold) state = 3;
                 else if (debtAfterDrain > 0f) state = 2;
+                else if (Thew < thewBeforeTick) state = 5;
                 else if (satFrac > (float)cfg.ThewGainSatietyGate) state = 1;
                 else state = 0;
 

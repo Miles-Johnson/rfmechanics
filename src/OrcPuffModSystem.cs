@@ -10,7 +10,7 @@ namespace rfmechanics
     /// <summary>
     /// Client-only visual cue for ThewBehavior.StateAttributeKey ("rf-orc-state"): a short
     /// particle burst repeated on an interval that scales with state (never the burst size).
-    /// State 1 (gaining) renders local-player-only; states 2/3 (debt) render for every nearby
+    /// State 1 (gaining) renders local-player-only; states 2/3 (debt), 4 (Burn), and 5 (loss) render for every nearby
     /// player. Per-tick reposition-and-spawn -- no attach-to-entity option exists in the particle
     /// API (see Entity.OnGameTick's IsOnFire branch, the same pattern OrcSmellModSystem uses).
     /// Reads the raw WatchedAttributes key directly, with no trait check of its own -- the byte
@@ -31,28 +31,35 @@ namespace rfmechanics
         public override void StartClientSide(ICoreClientAPI api)
         {
             capi = api;
-            BuildParticleTemplate();
-            capi.Event.RegisterGameTickListener(OnGameTick, 100);
+            var cfg = RFMechanicsModSystem.Config ?? new RFMechanicsConfig();
+            BuildParticleTemplate(cfg);
+            capi.Event.RegisterGameTickListener(OnGameTick, cfg.PuffTickIntervalMs);
         }
 
-        private void BuildParticleTemplate()
+        private void BuildParticleTemplate(RFMechanicsConfig cfg)
         {
             puffParticle = new SimpleParticleProperties
             {
                 ParticleModel = EnumParticleModel.Quad,
-                Color = ColorUtil.ToRgba(160, 235, 235, 235),
-                GravityEffect = 0.1f,
-                LifeLength = 0.6f,
-                MinSize = 0.15f,
-                MaxSize = 0.25f,
+                GravityEffect = (float)cfg.PuffGravityEffect,
+                LifeLength = (float)cfg.PuffLifeSeconds,
+                addLifeLength = (float)cfg.PuffLifeVariationSeconds,
+                MinSize = (float)cfg.PuffMinSize,
+                MaxSize = (float)cfg.PuffMaxSize,
                 MinQuantity = 1,
                 AddQuantity = 0,
                 MinPos = new Vec3d(),
-                AddPos = new Vec3d(0.3, 0.3, 0.3),
-                MinVelocity = new Vec3f(-0.15f, 0.1f, -0.15f),
-                AddVelocity = new Vec3f(0.3f, 0.25f, 0.3f),
+                AddPos = new Vec3d(cfg.PuffHorizontalSpread, cfg.PuffVerticalSpread, cfg.PuffHorizontalSpread),
+                MinVelocity = new Vec3f(-(float)cfg.PuffHorizontalSpeed, (float)cfg.PuffRiseSpeedMin, -(float)cfg.PuffHorizontalSpeed),
+                AddVelocity = new Vec3f(2f * (float)cfg.PuffHorizontalSpeed,
+                    (float)(cfg.PuffRiseSpeedMax - cfg.PuffRiseSpeedMin), 2f * (float)cfg.PuffHorizontalSpeed),
+                WindAffected = cfg.PuffWindAffected,
+                WindAffectednes = (float)cfg.PuffWindAffectedness,
+                WithTerrainCollision = true,
             };
-            puffParticle.OpacityEvolve = EvolvingNatFloat.create(EnumTransformFunction.LINEAR, -1f);
+            // LINEAR subtracts alpha units, not a fraction: fade the entire configured opacity.
+            puffParticle.OpacityEvolve = EvolvingNatFloat.create(EnumTransformFunction.LINEAR, -cfg.PuffOpacity);
+            puffParticle.SizeEvolve = EvolvingNatFloat.create(EnumTransformFunction.LINEAR, (float)cfg.PuffSizeGrowth);
         }
 
         private void OnGameTick(float dt)
@@ -73,7 +80,7 @@ namespace rfmechanics
                 foreach (Entity e in nearby)
                 {
                     int state = e.WatchedAttributes.GetInt(ThewBehavior.StateAttributeKey, 0);
-                    if (state <= 0)
+                    if (state <= 0 || state > 5)
                     {
                         accumByEntity.Remove(e.EntityId);
                         continue;
@@ -92,6 +99,8 @@ namespace rfmechanics
                     {
                         1 => cfg.PuffIntervalGaining,
                         2 => cfg.PuffIntervalLightDebt,
+                        4 => cfg.PuffIntervalBurning,
+                        5 => cfg.PuffIntervalLosing,
                         _ => cfg.PuffIntervalHeavyDebt
                     };
                     if (interval <= 0.0) continue;
@@ -100,7 +109,7 @@ namespace rfmechanics
                     accum += dt;
                     if (accum >= interval)
                     {
-                        EmitBurst(cfg, e);
+                        EmitBurst(cfg, e, state);
                         accum -= (float)interval;
                     }
                     accumByEntity[e.EntityId] = accum;
@@ -117,11 +126,14 @@ namespace rfmechanics
             }
         }
 
-        private void EmitBurst(RFMechanicsConfig cfg, Entity e)
+        private void EmitBurst(RFMechanicsConfig cfg, Entity e, int state)
         {
-            double eyeY = e is EntityPlayer ep ? ep.LocalEyePos.Y * 0.7 : 1.0;
+            double eyeY = e.LocalEyePos.Y * cfg.PuffSpawnHeightEyeFraction;
+            double halfSpread = cfg.PuffHorizontalSpread / 2.0;
+            int[] rgb = state == 1 ? cfg.PuffSteamColorRgb : state == 4 ? cfg.PuffBurnColorRgb : cfg.PuffSmokeColorRgb;
 
-            puffParticle!.MinPos.Set(e.Pos.X - 0.15, e.Pos.Y + eyeY, e.Pos.Z - 0.15);
+            puffParticle!.Color = ColorUtil.ToRgba(cfg.PuffOpacity, rgb[0], rgb[1], rgb[2]);
+            puffParticle.MinPos.Set(e.Pos.X - halfSpread, e.Pos.Y + eyeY, e.Pos.Z - halfSpread);
             puffParticle.MinQuantity = (float)cfg.PuffParticleCount;
 
             capi!.World.SpawnParticles(puffParticle);

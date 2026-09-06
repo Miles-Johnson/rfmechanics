@@ -1,4 +1,55 @@
-# rfmechanics — handover (as of 2026-09-02)
+# rfmechanics — handover (as of 2026-09-06)
+
+**Orc Band/Frenzy jump bonus zero-out, Frenzy debt to per-game-hour, Puff Burn/loss states,
+Goblin final-item grant fix, trait guards (2026-09-06), built, not yet deployed or confirmed
+in-game.** `JumpHeightMulDelta` (`OrcBandTriple`) and `FrenzyMaxJumpBonus`
+zeroed in `RFMechanicsConfig.cs` — both the coded default and the hand-edited live
+`ModConfig/rfmechanics.json`, since a successfully-parsed config always keeps its stored value
+over a new code default (same precedent as the `SmellParticlesFar`/`GoblinSpitFliesRadius`
+self-heal notes elsewhere in this file). Jump bonuses are zero, not deleted — the config surface
+and the `PModuleOnGround` math it feeds stay reversible without a patch.
+
+`FrenzyThewPerSecond` is now dormant: `FrenzyBehavior` no longer reads it (kept in the config
+class only so an already-loaded install doesn't drop the key on self-heal). Debt accrual now
+reads `FrenzyDebtPerGameHour` (0.60, matching the old 0.005/real-second peak at 120 real
+seconds per game hour) sampled from `entity.World.Calendar.ElapsedHours` each tick instead of
+`deltaTime` — in-game-hour anchored like Thew's own gain/decay zones, immune to real-time
+pausing or tick lag. Guarded against non-finite/backward calendar reads and inactive gaps: the
+first sample after activation or a calendar rewind establishes a fresh baseline instead of
+billing the gap.
+
+`ThewBehavior.StateAttributeKey`/`OrcPuffModSystem` gained two new puff-cue states: 4 (actively
+Burning, i.e. `BurnBehavior.Burning`) and 5 (net Thew loss this tick with no debt), read
+alongside the existing 0-3. The old hardcoded particle template is gone — steam/smoke/burn
+colors, opacity, rise speed, spread, gravity, and wind-affectedness are all config fields now
+(`Puff*` block, ~24 new keys in `RFMechanicsConfig.cs`), also present in the live
+`ModConfig/rfmechanics.json` post-deploy.
+
+`GoblinSpitChargeGrantPatch` (rot → spit charges) and dietsetup's `RotIntakeAccrualPatch`
+(standalone/meal/pie eating) were both rewritten from a single postfix reading `slot.Itemstack`
+to a prefix that captures evidence (the pre-eat stack, its collectible, its count) and a postfix
+that confirms the stack actually lost exactly one item before crediting anything — fixes a bug
+where the *final* item in a stack (slot goes empty, or gets replaced by an eaten-stack result)
+could be missed entirely.
+
+Four `hasClass` guards added in `RFMechanicsModSystem.cs`'s diagnostic dump, gating the
+dwarf/elf trait checks on a non-empty `characterClass` so an unassigned character doesn't read
+as having a negative/positive trait it was never given.
+
+Also fixed, different repo: the Elf stockpiling paragraph in
+`notes/dietsetup-race-diet-design.md` claimed Elf "cannot stockpile" any preserved/spoiled food;
+corrected against the actual rule priorities — fish/seed/nut rules at priority 30 retain full
+satiety/nutrition and override the generic priority-25 preserved/spoiled penalty, so there is no
+blanket stockpiling block.
+
+Build: `dotnet build -c Release`, rfmechanics 0 errors/35 warnings, dietsetup 0/0 — same
+warning baseline, no new warnings from this change. Validated first in a standalone harness (90
+assertions: 62 compiled-code/API checks, 28 clock/state source-snippet checks) before touching
+the live install. **Not yet deployed or confirmed in-game** — particle appearance (colors/states
+4-5) and the zeroed jump feel are playtest-only checks, and this entry predates the
+`tools/deploy-all.ps1` run that follows it.
+
+---
 
 **Race ability hotkeys consolidated from four to one (2026-09-02), built, not yet deployed
 or confirmed in-game.** `orcsmellfocus`, `rfelfzoom`, `rfdwarforesong`, and `rfgoblinspit`

@@ -778,10 +778,11 @@ namespace rfmechanics
                     float hungerrate = player.Entity.Stats.GetBlended("hungerrate");
 
                     var charSys = api.ModLoader.GetModSystem<CharacterSystem>();
-                    bool hasPositive = charSys != null && charSys.HasTrait(player, "rf-dwarf-positive");
-                    bool hasRfNegative = charSys != null && charSys.HasTrait(player, "rf-dwarf-negative");
-                    bool hasLrNegative = charSys != null && charSys.HasTrait(player, "dwarf-negative");
-                    bool hasElfPositive = charSys != null && charSys.HasTrait(player, config.ElfTraitCode);
+                    bool hasClass = !string.IsNullOrEmpty(wa.GetString("characterClass"));
+                    bool hasPositive = hasClass && charSys != null && charSys.HasTrait(player, "rf-dwarf-positive");
+                    bool hasRfNegative = hasClass && charSys != null && charSys.HasTrait(player, "rf-dwarf-negative");
+                    bool hasLrNegative = hasClass && charSys != null && charSys.HasTrait(player, "dwarf-negative");
+                    bool hasElfPositive = hasClass && charSys != null && charSys.HasTrait(player, config.ElfTraitCode);
 
                     float bankedClimbSeconds = player.Entity.Attributes.GetFloat("rf-climbseconds");
                     float flushTimer = player.Entity.Attributes.GetFloat("rf-climbflush");
@@ -930,8 +931,8 @@ namespace rfmechanics
                             float frenzyCurveMult = FrenzyBehavior.ComputeCurveMult(satFrac, cfg);
                             bool frenzyStalled = thewBhv != null && thewBhv.Thew <= 0f && (thewBhv.BurnDebt + thewBhv.FrenzyDebt) > 0f;
                             frenzyStr = string.Format(
-                                "frenzyCurveMult={0:F3} stalled={1} walkspeedBonus={2:F3} jumpBonus={3:F3} debtGate={4:F2} thewPerSec={5:F3}",
-                                frenzyCurveMult, frenzyStalled, (float)cfg.FrenzyMaxSpeedBonus * frenzyCurveMult, (float)cfg.FrenzyMaxJumpBonus * frenzyCurveMult, cfg.FrenzyDebtSatietyThreshold, cfg.FrenzyThewPerSecond);
+                                "frenzyCurveMult={0:F3} stalled={1} walkspeedBonus={2:F3} jumpBonus={3:F3} debtGate={4:F2} debtPerGameHour={5:F3}",
+                                frenzyCurveMult, frenzyStalled, (float)cfg.FrenzyMaxSpeedBonus * frenzyCurveMult, (float)cfg.FrenzyMaxJumpBonus * frenzyCurveMult, cfg.FrenzyDebtSatietyThreshold, cfg.FrenzyDebtPerGameHour);
                         }
 
                         string debtStr = thewBhv != null

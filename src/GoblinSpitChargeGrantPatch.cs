@@ -10,8 +10,8 @@ namespace rfmechanics
     /// Postfix on CollectibleObject.tryEatStop -- grants spit charges when a goblin finishes
     /// eating game:rot. Deliberately not folded into GoblinRotEdiblePatch: that class patches
     /// GetNutritionProperties, which only makes rot look edible and carries no eat-completion
-    /// signal. tryEatStop has direct access to slot.Itemstack (to confirm the eaten item is
-    /// literally game:rot) and already gates real eat completion the same way this mirrors.
+    /// signal. Prefix captures the original game:rot stack; postfix confirms its count fell by
+    /// one even when the final item left the slot empty or replaced with an eaten-stack result.
     /// tryEatStop is protected, so the attribute below uses the string method name -- nameof(...)
     /// cannot reference an inaccessible member; there is only one overload, so it's unambiguous.
     /// </summary>
@@ -23,9 +23,11 @@ namespace rfmechanics
         private const string RotFliesUpdatedHoursKey = "rfmechanics:rotFliesUpdatedHours";
         private static bool loggedException = false;
 
-        [HarmonyPostfix]
-        public static void Postfix(float secondsUsed, ItemSlot slot, EntityAgent byEntity)
+        [HarmonyPrefix]
+        public static void Prefix(CollectibleObject __instance, float secondsUsed, ItemSlot slot, EntityAgent byEntity,
+            out (ItemStack Stack, CollectibleObject Collectible, int InitialCount)? __state)
         {
+            __state = null;
             try
             {
                 if (byEntity?.World == null) return;
@@ -38,13 +40,38 @@ namespace rfmechanics
                 // Mirrors tryEatStop's own completion gate -- a cancelled bite shouldn't grant a charge.
                 if (secondsUsed < 0.95f) return;
 
-                var code = slot?.Itemstack?.Collectible?.Code;
+                var stack = slot?.Itemstack;
+                var collectible = stack?.Collectible;
+                var code = collectible?.Code;
                 if (code == null || code.Domain != "game" || code.Path != "rot") return;
+                if (stack == null || stack.StackSize <= 0 || !ReferenceEquals(collectible, __instance)) return;
 
                 if (byEntity is not EntityPlayer player) return;
 
                 IPlayer iplayer = player.World.PlayerByUid(player.PlayerUID);
                 if (!RaceTraits.HasTrait(iplayer, cfg.GoblinTraitCode)) return;
+
+                __state = (stack, __instance, stack.StackSize);
+            }
+            catch (Exception ex)
+            {
+                LogException(ex);
+            }
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(float secondsUsed, EntityAgent byEntity, bool __runOriginal,
+            (ItemStack Stack, CollectibleObject Collectible, int InitialCount)? __state)
+        {
+            try
+            {
+                if (!__runOriginal || secondsUsed < 0.95f || __state is not { } evidence) return;
+                if (!ReferenceEquals(evidence.Stack.Collectible, evidence.Collectible)
+                    || evidence.Stack.StackSize != evidence.InitialCount - 1) return;
+                if (byEntity is not EntityPlayer player || player.World.Side != EnumAppSide.Server) return;
+
+                var cfg = RFMechanicsModSystem.Config;
+                if (cfg == null) return;
 
                 if (cfg.EnableGoblinSpitCharges)
                 {
@@ -60,13 +87,16 @@ namespace rfmechanics
             }
             catch (Exception ex)
             {
-                if (!loggedException)
-                {
-                    loggedException = true;
-                    RFMechanicsModSystem.Api?.Logger?.Warning(
-                        "[rfmechanics] Exception in GoblinSpitChargeGrantPatch: {0}", ex);
-                }
+                LogException(ex);
             }
+        }
+
+        private static void LogException(Exception ex)
+        {
+            if (loggedException) return;
+            loggedException = true;
+            RFMechanicsModSystem.Api?.Logger?.Warning(
+                "[rfmechanics] Exception in GoblinSpitChargeGrantPatch: {0}", ex);
         }
 
         /// <summary>
