@@ -1,5 +1,26 @@
 # oresong
 
+## Current seated listening palette (2026-09-07)
+
+Run `python render_seated_oresong.py` to render and verify the current assets, or
+`python render_seated_oresong.py --check` to verify without writing. `--only iron,nativecopper`
+limits material selection. Requires Python, NumPy, SciPy and ffmpeg; no game samples.
+
+Sixteen material voices have three deterministic variations and separate rough/clear
+layers (96 mono OGGs), plus a knock and stone response. Voices last 4.2 seconds at
+44.1kHz. Distinct attack rhythms, partial spacing, texture and decay identify materials;
+grade crossfades rough/clear, size adds a restrained chorus, distance changes clarity.
+Runtime pitch variation is only +/-1%. All outputs are original procedural synthesis.
+
+The renderer verifies channel count, sample rate, decoded duration, finite samples and
+peak headroom. Its RMS normalization keeps materials at comparable levels. Actual
+perceived balance and directional readability still need the in-game playtest.
+
+`render_oresong.py` below is the historical v1 renderer. It now writes OGGs under
+`wav/legacy-v1/`, outside the shipped assets, so it cannot overwrite this palette.
+
+## Historical v1 notes
+
 Procedural synthesizer for the dwarf ore-song mechanic's sound assets. Renders
 one mono `.ogg` per ore/gem material from a Python data table, with real
 vanilla-game sound textures blended in as an extra layer per material.

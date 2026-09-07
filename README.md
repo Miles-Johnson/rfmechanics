@@ -1,6 +1,6 @@
 # RF Mechanics
 
-Prerelease candidate for Vintage Story 1.22.6. In-game acceptance is still pending.
+Initial baseline **1.0.0** for Vintage Story **1.22.6**. Live gameplay acceptance is still pending; expect bugs and balance changes.
 
 **Summary:** Race-specific abilities and survival mechanics, from elven climbing and dwarven Ore-Song to Orc Thew and goblin scavenging.
 
@@ -14,7 +14,7 @@ That includes generating and explaining code, researching implementation options
 
 RF Mechanics is the gameplay companion to Race Framework. It gives races different ways to explore, gather and survive.
 
-- **Dwarves:** mining bonuses that vary with depth, plus **Ore-Song**. Knock on rock with an empty hand and listen for nearby ore through distinct sound cues.
+- **Dwarves:** mining bonuses that vary with depth, plus **Ore-Song**. Sit beside stone or ore, empty your main hand, and press Race Ability (default C) while aiming at a wall within two blocks. Settle, knock, and listen for distant mineral voices with broad directional cues. Standing or moving ends the listen. Placed ore sings too.
 - **Elves:** climb trees, move through branchy leaves and use focused vision to look into the distance.
 - **Orcs:** maintain **Thew** through feeding, with changes to body size and physical capabilities. Frenzy offers a burst of power with recovery costs. Use scent to help locate creatures; standing still builds a clearer sense.
 - **Goblins:** small, nimble scavengers whose size helps them explore cramped spaces. Use spit to help collect materials from ruins, with darkvision and scavenging bonuses supporting the playstyle. Eating rot also builds an aura that accelerates nearby food spoilage; abstaining lets it fade. Flies provide feedback for the aura and stored spit charges.
@@ -54,7 +54,7 @@ Original work is MIT-licensed. Forks, modifications and contributions are welcom
 
 Thanks to **Fuami's Spyglass** for the FOV implementation reference, **123Gurkensalat's Scaffolding** for climbing/collision research, **Algorytmiczny's More Bugs** for rot-fly inspiration, and **Xandu and El_Neuman's xSkills work** for mechanics references. Thanks also to **Anego Studios** for Vintage Story and its modding tools. Detailed attribution is included with the mod.
 
-[Source code](https://github.com/Miles-Johnson/rfmechanics) · [Report a problem](https://github.com/Miles-Johnson/rfmechanics/issues)
+[Source code](https://github.com/Question-AK/rfmechanics) · [Report a problem](https://github.com/Question-AK/rfmechanics/issues)
 
 
 ## Build and contribute

@@ -884,37 +884,48 @@ public class RFMechanicsConfig
 
     /// <summary>Master toggle for the Dwarf ore-song mechanic (the shared "rfraceability" hotkey,
     /// as a dwarf, makes nearby ore/gem deposits answer with a positioned sound per material).
-    /// Client-only, no network traffic.</summary>
+    /// Server-authoritative seated stone listening.</summary>
     public bool DwarfOreSongEnabled { get; set; } = true;
 
-    /// <summary>Scan radius in blocks around the player. Capped at 20 by
-    /// DwarfOreSongModSystem (see notes/diagnostics/ore-song-discovery.md Q6 -- vanilla itself
-    /// routes comparable-or-smaller inline WalkBlocks scans onto a background thread; a v1
-    /// inline scan does not go past this cap).</summary>
-    public int OreSongRadius { get; set; } = 16;
+    /// <summary>Legacy v1 field retained for configuration round-tripping; no longer used.</summary>
+    public int OreSongRadius { get; set; } = 16; // Legacy v1 setting; ignored by seated listening.
 
-    /// <summary>Cooldown between ore-song triggers, milliseconds. Must stay &gt;= the longest
-    /// ore-song asset (10s) -- this is what prevents overlapping playback instead of any
-    /// fade/dispose-tracking logic (see the v1 brief's Phase 4 rationale).</summary>
-    public int OreSongCooldownMs { get; set; } = 10000;
+    /// <summary>Legacy v1 field retained for configuration round-tripping; no longer used.</summary>
+    public int OreSongCooldownMs { get; set; } = 10000; // Legacy v1 setting; ignored.
 
-    /// <summary>Max number of material clusters played per knock. Clusters beyond the nearest
-    /// this many (by distance) are discarded silently.</summary>
+    /// <summary>Different mineral voices per knock, clamped 1..3. Further knocks rotate
+    /// through up to twelve detected minerals.</summary>
     public int OreSongMaxClusters { get; set; } = 3;
 
-    /// <summary>Greedy cluster-merge distance in blocks -- a hit joins an existing cluster of
-    /// the same material if within this distance of that cluster's centroid.</summary>
-    public double OreSongClusterMergeDistance { get; set; } = 6;
+    /// <summary>Legacy v1 field retained for configuration round-tripping; no longer used.</summary>
+    public double OreSongClusterMergeDistance { get; set; } = 6; // Legacy v1 setting; ignored.
 
-    /// <summary>Floor applied to a cluster's final playback volume (gradeGain x
-    /// distanceFalloff), so distant/poor-grade deposits are still faintly audible rather than
-    /// silent.</summary>
-    public double OreSongVolumeFloor { get; set; } = 0.15;
+    /// <summary>Legacy v1 field retained for configuration round-tripping; no longer used.</summary>
+    public double OreSongVolumeFloor { get; set; } = 0.15; // Legacy v1 setting; ignored.
 
-    /// <summary>Max random pitch jitter (+/-, fraction of 1.0) applied per cluster. Load-bearing,
-    /// not cosmetic -- two same-material clusters at identical pitch are phase-identical files
-    /// and comb-filter into sounding like one source.</summary>
-    public double OreSongPitchJitter { get; set; } = 0.05;
+    /// <summary>Legacy v1 field retained for configuration round-tripping; no longer used.</summary>
+    public double OreSongPitchJitter { get; set; } = 0.05; // Legacy v1 setting; ignored.
+
+    // New names deliberately avoid silently retaining the old 16-block/10-second config values.
+    /// <summary>Server scan radius, capped at 96. Reads loaded terrain only; no chunk generation.</summary>
+    public int OreSongListeningRadius { get; set; } = 96;
+    /// <summary>Minimum stillness before the knock. Budgeted cold searches may take longer.</summary>
+    public int OreSongSettleMs { get; set; } = 2000;
+    /// <summary>Listening period after the knock; minimum 10 seconds accommodates three voices.</summary>
+    public int OreSongListenMs { get; set; } = 10000;
+    /// <summary>Recovery after finishing or cancelling, milliseconds.</summary>
+    public int OreSongRestMs { get; set; } = 3000;
+    /// <summary>ONE shared server work budget per 50ms tick, milliseconds. Clamped 0.25..2.
+    /// A single engine unpack/lock cannot be preempted; /rforesong reports measured worst slices.</summary>
+    public double OreSongServerBudgetMs { get; set; } = 1;
+    /// <summary>Bounded memory-only chunk summary cache, clamped 64..1024; 30-second expiry.</summary>
+    public int OreSongCacheChunks { get; set; } = 512;
+    /// <summary>Concurrent listeners admitted on the server, clamped 1..8. Budget is shared.</summary>
+    public int OreSongMaxListeners { get; set; } = 4;
+    /// <summary>Client-only audio gain, 0..2, applied under the game's sound-effects volume.</summary>
+    public float OreSongVolume { get; set; } = 1;
+    /// <summary>Client-only coarse sensory captions for players unable to use directional audio.</summary>
+    public bool OreSongCaptions { get; set; } = false;
 
     // ── Chunk scar tracker (passive data collector, no gameplay consumer -- see
     // ChunkScarTracker.cs's header and notes/race-mechanics/chunk-scar-archived.md) ──

@@ -3,13 +3,14 @@
   "modid": "rfmechanics",
   "name": "RF Mechanics",
   "description": "Race-specific abilities: elven climbing, dwarven Ore-Song, orc Thew and scent, and goblin scavenging with spit.",
-  "version": "0.1.2-rc.2",
+  "version": "1.0.0",
   "requiredOnClient": true,
   "dependencies": {
-    "game": "1.22.0",
-    "survival": "1.22.0"
+    "game": "1.22.6",
+    "survival": "1.22.6"
   },
   "authors": [
-    "Kjol"
-  ]
+    "Question"
+  ],
+  "requiredOnServer": true
 }

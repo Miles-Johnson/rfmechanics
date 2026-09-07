@@ -22,10 +22,8 @@ NOISE_BODY_BAND = (80.0, 450.0)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WAV_DIR = SCRIPT_DIR / "wav"
-OGG_DIR = (
-    SCRIPT_DIR.parent.parent
-    / "assets" / "rfmechanics" / "sounds" / "oresong"
-)
+# Historical v1 renderer. Keep its game-derived outputs out of the current mod package.
+OGG_DIR = WAV_DIR / "legacy-v1"
 VANILLA_SOUNDS = Path(os.environ.get("VINTAGE_STORY", r"C:\Games\Vintagestory")) / "assets" / "survival" / "sounds"
 
 

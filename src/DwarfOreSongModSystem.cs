@@ -5,332 +5,219 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.MathTools;
+using Vintagestory.API.Server;
 
-namespace rfmechanics
+namespace rfmechanics;
+
+public partial class DwarfOreSongModSystem : ModSystem
 {
-    public class OreSongEntry
+    private ICoreServerAPI? sapi;
+    private IServerNetworkChannel? serverChannel;
+    private DwarfOreSongIndex? index;
+    private RFMechanicsConfig serverConfig = new();
+    private readonly List<ListeningSession> listeners = new();
+    private readonly Dictionary<string, long> nextRequest = new();
+    private readonly Dictionary<string, long> nextListen = new();
+    private long serverTickId;
+    private int roundRobin;
+    private double worstSliceMs;
+    private long totalSlices, incompleteAnswers;
+
+    public override void Start(ICoreAPI api)
     {
-        public string AssetPath;
-        public float GradeGain;
+        base.Start(api);
+        api.Network.RegisterChannel(OreSongRules.Channel)
+            .RegisterMessageType<OreSongRequest>().RegisterMessageType<OreSongReply>();
     }
 
-    /// <summary>
-    /// Client-only lookup table plus trigger for the Dwarf ore-song mechanic: maps every
-    /// registered Ore-material block id to (asset path, grade-derived gain), and fires a scan
-    /// centered on the player when RaceAbilityHotkeyModSystem dispatches to TryTrigger --
-    /// Variant["type"]/["grade"]/["potential"] reads are already O(1) per-block, so the lookup
-    /// just memoizes an already-cheap read (see notes/diagnostics/ore-song-discovery.md Q1).
-    ///
-    /// Client-only (ShouldLoad), mirroring GoblinDarkvisionModSystem's own pattern (Q3) --
-    /// exactly one instance ever exists, so unlike RFMechanicsModSystem.Api this has no
-    /// last-writer-wins race.
-    /// </summary>
-    public class DwarfOreSongModSystem : ModSystem
+    public override void StartServerSide(ICoreServerAPI api)
     {
-        private const string LastTriggerKey = "rfmechanics:oreSongLastMs";
-        private ICoreClientAPI? capi;
-
-        public Dictionary<int, OreSongEntry> Lookup { get; } = new Dictionary<int, OreSongEntry>();
-
-        public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
-
-        public override void StartClientSide(ICoreClientAPI api)
+        sapi = api;
+        // Own server configuration snapshot: the old global static is shared with the client
+        // in singleplayer. Clients never get to choose range, budgets or eligibility.
+        try { serverConfig = api.LoadModConfig<RFMechanicsConfig>("rfmechanics.json") ?? new(); }
+        catch (Exception error) { api.Logger.Warning("[rfmechanics] Ore-Song using defaults: {0}", error.Message); }
+        serverChannel = api.Network.GetChannel(OreSongRules.Channel).SetMessageHandler<OreSongRequest>(OnRequest);
+        api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, () =>
         {
-            base.StartClientSide(api);
-            capi = api;
-            // Multiplayer block definitions have not arrived at StartClientSide yet.
-            api.Event.BlockTexturesLoaded += OnBlockTexturesLoaded;
+            index = new DwarfOreSongIndex(api, serverConfig.OreSongCacheChunks);
+            api.Event.ChunkDirty += index.Invalidate;
+        });
+        api.Event.PlayerDisconnect += OnDisconnect;
+        serverTickId = api.Event.RegisterGameTickListener(OnServerTick, OreSongRules.TickMs);
+        api.ChatCommands.Create("rforesong")
+            .WithDescription("Read Ore-Song server work and cache counters; does not scan or change terrain.")
+            .RequiresPrivilege(Privilege.controlserver)
+            .HandleWith(_ => TextCommandResult.Success(
+                $"Ore-Song: {listeners.Count} listeners; {index?.CacheCount ?? 0} cached chunks; " +
+                $"{index?.BlocksRead ?? 0} block reads, {index?.PaletteSkips ?? 0} palette skips, " +
+                $"{index?.CacheHits ?? 0} cache hits; {totalSlices} work ticks; " +
+                $"worst work slice {worstSliceMs:F2}ms (target {BudgetMs:F2}ms); " +
+                $"{incompleteAnswers} incomplete answers. Loaded terrain only."));
+    }
+
+    private double BudgetMs => double.IsFinite(serverConfig.OreSongServerBudgetMs)
+        ? Math.Clamp(serverConfig.OreSongServerBudgetMs, 0.25, 2) : 1;
+    private int SettleMs => Math.Clamp(serverConfig.OreSongSettleMs, 1000, 5000);
+    private int ListenMs => Math.Clamp(serverConfig.OreSongListenMs, 10000, 20000);
+    private int RestMs => Math.Clamp(serverConfig.OreSongRestMs, 1000, 10000);
+
+    private void Reply(IServerPlayer player, int id, string state)
+        => serverChannel?.SendPacket(new OreSongReply { Id = id, State = state, ListenMs = ListenMs, RestMs = RestMs }, player);
+
+    private void OnRequest(IServerPlayer player, OreSongRequest request)
+    {
+        if (sapi == null) return;
+        long now = sapi.World.ElapsedMilliseconds;
+        int existing = listeners.FindIndex(s => s.Player.PlayerUID == player.PlayerUID);
+        if (request.Cancel)
+        {
+            if (existing >= 0 && listeners[existing].Id == request.Id) EndSession(existing, now, true);
+            return;
         }
-
-        private void OnBlockTexturesLoaded()
+        if (nextRequest.TryGetValue(player.PlayerUID, out long next) && now < next) return;
+        nextRequest[player.PlayerUID] = now + 500;
+        if (!serverConfig.DwarfOreSongEnabled) { Reply(player, request.Id, "disabled"); return; }
+        if (index == null || existing >= 0 || (nextListen.TryGetValue(player.PlayerUID, out next) && now < next)
+            || listeners.Count >= Math.Clamp(serverConfig.OreSongMaxListeners, 1, 8))
         {
-            if (capi != null) BuildLookup(capi);
+            Reply(player, request.Id, "busy");
+            return;
         }
-
-        public override void Dispose()
+        EntityPlayer entity = player.Entity;
+        var wall = new BlockPos(request.X, request.Y, request.Z, entity.Pos.Dimension);
+        if (!OreSongRules.IsSeated(entity, true) || !RaceTraits.HasTrait(player, serverConfig.DwarfTraitCode)
+            || !OreSongRules.InReach(entity, wall, true) || !OreSongRules.IsStone(sapi.World.BlockAccessor.GetBlock(wall))
+            || !CanTouchWall(entity, wall))
         {
-            if (capi != null) capi.Event.BlockTexturesLoaded -= OnBlockTexturesLoaded;
-            capi = null;
-            Lookup.Clear();
-            base.Dispose();
+            Reply(player, request.Id, "invalid");
+            return;
         }
-
-        /// <summary>Moved here from the old right-click-on-rock BlockBehavior -- same cooldown
-        /// key, just centered on the player's feet instead of a clicked block position, since a
-        /// keypress has no block selection to read.
-        ///
-        /// Called from RaceAbilityHotkeyModSystem's dispatch table once it has already confirmed
-        /// the presser is cached as Dwarf -- no race check here, that decision belongs to the
-        /// dispatcher alone.</summary>
-        internal bool TryTrigger(ICoreClientAPI api)
+        int radius = Math.Clamp(serverConfig.OreSongListeningRadius, 16, 96);
+        listeners.Add(new ListeningSession
         {
-            var cfg = RFMechanicsModSystem.Config;
-            IPlayer player = api.World.Player;
-            if (cfg == null || player?.Entity == null) return false;
+            Player = player, Id = request.Id, Wall = wall, Origin = entity.Pos.XYZ,
+            StartedMs = now, Query = index.CreateQuery(wall, radius)
+        });
+        Reply(player, request.Id, "settling");
+    }
 
-            if (!cfg.DwarfOreSongEnabled) return true;
+    private bool CanTouchWall(EntityPlayer entity, BlockPos wall)
+    {
+        if (sapi == null) return false;
+        var from = new Vec3d(entity.Pos.X, entity.Pos.InternalY + entity.LocalEyePos.Y, entity.Pos.Z);
+        var to = new Vec3d(wall.X + 0.5, wall.InternalY + 0.5, wall.Z + 0.5);
+        BlockSelection? selected = null;
+        EntitySelection? selectedEntity = null;
+        sapi.World.RayTraceForSelection(from, to, ref selected, ref selectedEntity);
+        return selected?.Position.Equals(wall) == true;
+    }
 
-            EntityPlayer entityPlayer = player.Entity;
-            long nowMs = api.World.ElapsedMilliseconds;
-            long lastMs = entityPlayer.Attributes.GetLong(LastTriggerKey, 0);
-            if (nowMs - lastMs < cfg.OreSongCooldownMs) return true;
+    private bool StillListening(ListeningSession session)
+    {
+        EntityPlayer entity = session.Player.Entity;
+        return sapi != null && entity.Pos.Dimension == session.Wall.dimension
+            && OreSongRules.IsSeated(entity, true) && entity.Pos.XYZ.SquareDistanceTo(session.Origin) <= OreSongRules.MoveToleranceSq
+            && RaceTraits.HasTrait(session.Player, serverConfig.DwarfTraitCode)
+            && OreSongRules.IsStone(sapi.World.BlockAccessor.GetBlock(session.Wall));
+    }
 
-            entityPlayer.Attributes.SetLong(LastTriggerKey, nowMs);
-            ScanAndPlay(api.World, api.World, this, cfg, entityPlayer.Pos.AsBlockPos);
-            return true;
+    private void OnServerTick(float dt)
+    {
+        if (sapi == null || index == null || listeners.Count == 0) return;
+        long now = sapi.World.ElapsedMilliseconds;
+        for (int i = listeners.Count - 1; i >= 0; i--)
+        {
+            var session = listeners[i];
+            if (!serverConfig.DwarfOreSongEnabled || !StillListening(session)) { EndSession(i, now, true); continue; }
+            if (session.AnsweredMs > 0 && now - session.AnsweredMs >= ListenMs) EndSession(i, now, false);
         }
+        if (listeners.Count == 0) return;
 
-        private static void ScanAndPlay(IWorldAccessor world, IClientWorldAccessor clientWorld, DwarfOreSongModSystem oreSongSys, RFMechanicsConfig cfg, BlockPos center)
+        var timer = Stopwatch.StartNew();
+        int newChunks = 0, quanta = 0, idle = 0;
+        try
         {
-            int radius = GameMath.Clamp(cfg.OreSongRadius, 1, 20);
-            BlockPos min = center.AddCopy(-radius, -radius, -radius);
-            BlockPos max = center.AddCopy(radius, radius, radius);
-            double radiusSq = (double)radius * radius;
-            double mergeDistSq = cfg.OreSongClusterMergeDistance * cfg.OreSongClusterMergeDistance;
-
-            var clustersByMaterial = new Dictionary<string, List<Cluster>>();
-            var chunkLoadedCache = new Dictionary<long, bool>();
-
-            var sw = Stopwatch.StartNew();
-
-            world.BlockAccessor.WalkBlocks(min, max, (block, x, y, z) =>
+            // Global caps, not per player: <= 1ms target/50ms by default, <= 32768 block
+            // reads, <= 8 new chunk preparations. Slow machines do less work, not longer ticks.
+            while (timer.Elapsed.TotalMilliseconds < BudgetMs && newChunks < 8 && quanta < 128 && idle < listeners.Count)
             {
-                if (block == null || block.Id == 0)
-                    return;
-
-                double dx = x - center.X, dy = y - center.Y, dz = z - center.Z;
-                if (dx * dx + dy * dy + dz * dz > radiusSq)
-                    return;
-
-                if (!oreSongSys.Lookup.TryGetValue(block.Id, out OreSongEntry entry))
-                    return;
-
-                // Chunk-loaded check, cached per chunk (not re-fetched per block) -- unloaded
-                // reads silently return air rather than throwing (discovery report Q6), but a
-                // chunk sitting at the render horizon could still return a stale/partial block
-                // id, so this mirrors vanilla's own GetChunk+LoadedFromServer client-side check
-                // (ChunkMapLayer.cs) before trusting a hit.
-                long chunkKey = ChunkKey(x >> 5, y >> 5, z >> 5);
-                if (!chunkLoadedCache.TryGetValue(chunkKey, out bool loaded))
-                {
-                    var chunk = world.BlockAccessor.GetChunk(x >> 5, y >> 5, z >> 5);
-                    loaded = chunk != null && (chunk as IClientChunk)?.LoadedFromServer == true;
-                    chunkLoadedCache[chunkKey] = loaded;
-                }
-                if (!loaded)
-                    return;
-
-                if (!clustersByMaterial.TryGetValue(entry.AssetPath, out List<Cluster> clusters))
-                {
-                    clusters = new List<Cluster>();
-                    clustersByMaterial[entry.AssetPath] = clusters;
-                }
-
-                Cluster target = null;
-                foreach (Cluster c in clusters)
-                {
-                    double cdx = x - c.CentroidX(), cdy = y - c.CentroidY(), cdz = z - c.CentroidZ();
-                    if (cdx * cdx + cdy * cdy + cdz * cdz <= mergeDistSq)
-                    {
-                        target = c;
-                        break;
-                    }
-                }
-                if (target == null)
-                {
-                    target = new Cluster { AssetPath = entry.AssetPath, GradeGain = entry.GradeGain };
-                    clusters.Add(target);
-                }
-
-                target.SumX += x;
-                target.SumY += y;
-                target.SumZ += z;
-                target.Count++;
-                target.GradeGain = Math.Max(target.GradeGain, entry.GradeGain);
-            });
-
-            sw.Stop();
-            ICoreAPI api = world.Api;
-            if (sw.ElapsedMilliseconds > 15)
-            {
-                api.Logger.Warning("[rfmechanics] DwarfOreSong scan took {0}ms (radius {1}) -- exceeds 15ms budget.", sw.ElapsedMilliseconds, radius);
-            }
-            else
-            {
-                api.Logger.Debug("[rfmechanics] DwarfOreSong scan took {0}ms (radius {1}).", sw.ElapsedMilliseconds, radius);
-            }
-
-            var allClusters = new List<Cluster>();
-            foreach (List<Cluster> clusters in clustersByMaterial.Values)
-                allClusters.AddRange(clusters);
-
-            allClusters.Sort((a, b) => a.DistSqTo(center).CompareTo(b.DistSqTo(center)));
-
-            int playCount = Math.Min(Math.Max(0, cfg.OreSongMaxClusters), allClusters.Count);
-            for (int i = 0; i < playCount; i++)
-            {
-                PlayCluster(world, clientWorld, cfg, allClusters[i], center, radius);
+                roundRobin %= listeners.Count;
+                var session = listeners[roundRobin++];
+                if (session.AnsweredMs > 0 || session.Query.Done) { idle++; continue; }
+                idle = 0;
+                if (index.Step(session.Query, now)) newChunks++;
+                quanta++;
             }
         }
-
-        private static void PlayCluster(IWorldAccessor world, IClientWorldAccessor clientWorld, RFMechanicsConfig cfg, Cluster cluster, BlockPos center, int radius)
+        catch (Exception error)
         {
-            double dist = Math.Sqrt(cluster.DistSqTo(center));
-            float distanceFalloff = (float)GameMath.Clamp(1.0 - dist / radius, 0.0, 1.0);
-            float volume = Math.Max((float)cfg.OreSongVolumeFloor, cluster.GradeGain * distanceFalloff);
+            sapi.Logger.Error("[rfmechanics] Ore-Song search cancelled: {0}", error);
+            index.Clear();
+            for (int i = listeners.Count - 1; i >= 0; i--) EndSession(i, now, true);
+        }
+        timer.Stop();
+        if (quanta > 0) { totalSlices++; worstSliceMs = Math.Max(worstSliceMs, timer.Elapsed.TotalMilliseconds); }
 
-            float jitter = (float)((world.Rand.NextDouble() * 2.0 - 1.0) * cfg.OreSongPitchJitter);
-            float pitch = 1.0f + jitter;
-
-            var param = new SoundParams()
+        foreach (var session in listeners)
+        {
+            if (session.AnsweredMs > 0 || now - session.StartedMs < SettleMs) continue;
+            if (!session.Query.Done && now - session.StartedMs < OreSongRules.MaxSearchMs) continue;
+            var foundVoices = session.Query.Voices();
+            bool incomplete = !session.Query.Done || session.Query.Incomplete;
+            if (incomplete) incompleteAnswers++;
+            session.AnsweredMs = now;
+            serverChannel?.SendPacket(new OreSongReply
             {
-                Location = new AssetLocation("rfmechanics", "sounds/oresong/" + cluster.AssetPath + ".ogg"),
-                Position = new Vec3f((float)cluster.CentroidX() + 0.5f, (float)cluster.CentroidY() + 0.5f, (float)cluster.CentroidZ() + 0.5f),
-                RelativePosition = false,
-                ShouldLoop = false,
-                DisposeOnFinish = true,
-                SoundType = EnumSoundType.Ambient,
-                Pitch = pitch,
-                Volume = volume,
-                Range = radius + 8,
-            };
-
-            ILoadedSound sound = clientWorld.LoadSound(param);
-            sound?.Start();
+                Id = session.Id, State = "answer", Incomplete = incomplete,
+                ListenMs = ListenMs, RestMs = RestMs, Voices = foundVoices,
+                MaxVoices = Math.Clamp(serverConfig.OreSongMaxClusters, 1, 3)
+            }, session.Player);
+            // Ordinary knock audible to companions; ore responses remain private to the dwarf.
+            sapi.World.PlaySoundAt(new AssetLocation("rfmechanics", "sounds/oresong/knock.ogg"),
+                session.Wall.X + 0.5, session.Wall.InternalY + 0.5, session.Wall.Z + 0.5,
+                session.Player, false, 12, 0.65f);
         }
+    }
 
-        private static long ChunkKey(int cx, int cy, int cz)
+    private void EndSession(int position, long now, bool cancelled)
+    {
+        var session = listeners[position];
+        nextListen[session.Player.PlayerUID] = now + RestMs;
+        if (cancelled) Reply(session.Player, session.Id, "cancelled");
+        listeners.RemoveAt(position);
+    }
+
+    private void OnDisconnect(IServerPlayer player)
+    {
+        listeners.RemoveAll(s => s.Player.PlayerUID == player.PlayerUID);
+        nextRequest.Remove(player.PlayerUID);
+        nextListen.Remove(player.PlayerUID);
+    }
+
+    public override void Dispose()
+    {
+        if (sapi != null)
         {
-            return ((long)(cx & 0x1FFFFF) << 42) | ((long)(cy & 0x1FFFFF) << 21) | (uint)(cz & 0x1FFFFF);
+            sapi.Event.UnregisterGameTickListener(serverTickId);
+            sapi.Event.PlayerDisconnect -= OnDisconnect;
+            if (index != null) sapi.Event.ChunkDirty -= index.Invalidate;
         }
+        index?.Clear();
+        listeners.Clear();
+        nextRequest.Clear();
+        nextListen.Clear();
+        DisposeClient();
+        base.Dispose();
+    }
 
-        private class Cluster
-        {
-            public string AssetPath;
-            public float GradeGain;
-            public double SumX, SumY, SumZ;
-            public int Count;
-
-            public double CentroidX() => SumX / Count;
-            public double CentroidY() => SumY / Count;
-            public double CentroidZ() => SumZ / Count;
-
-            public double DistSqTo(BlockPos pos)
-            {
-                double dx = CentroidX() - pos.X, dy = CentroidY() - pos.Y, dz = CentroidZ() - pos.Z;
-                return dx * dx + dy * dy + dz * dz;
-            }
-        }
-
-        private void BuildLookup(ICoreClientAPI api)
-        {
-            // A repeated load must replace the previous world's block IDs.
-            Lookup.Clear();
-            var loggedUnmapped = new HashSet<string>();
-
-            foreach (Block block in api.World.Blocks)
-            {
-                if (block == null || block.BlockMaterial != EnumBlockMaterial.Ore)
-                    continue;
-
-                // Read Variant["type"] directly off Block, never cast to BlockOre -- gems are
-                // plain Block and a cast throws/returns null, silently dropping every
-                // diamond/emerald/olivine (discovery report Q1).
-                string type = block.Variant["type"];
-                if (string.IsNullOrEmpty(type))
-                    continue;
-
-                string material = ResolveJointMaterial(type);
-                string assetPath = MaterialToAsset(material);
-                if (assetPath == null)
-                {
-                    assetPath = "oresong-nativecopper";
-                    if (loggedUnmapped.Add(material))
-                    {
-                        api.Logger.Debug("[rfmechanics] DwarfOreSong: unmapped ore type '{0}' (from '{1}') -- routed to neutral default (oresong-nativecopper).", material, type);
-                    }
-                }
-
-                Lookup[block.Id] = new OreSongEntry
-                {
-                    AssetPath = assetPath,
-                    GradeGain = ComputeGradeGain(block)
-                };
-            }
-
-            api.Logger.Notification("[rfmechanics] DwarfOreSong lookup built: {0} ore/gem blocks mapped.", Lookup.Count);
-        }
-
-        /// <summary>
-        /// Joint type values (e.g. "galena_nativesilver") need a single substance picked out of
-        /// two. Verified against the live install's actual ore-graded.json/ore-gem.json rather
-        /// than assumed: the only real joint values that exist are galena_nativesilver,
-        /// quartz_nativegold, quartz_nativesilver (host-mineral + precious-metal pairs -- the
-        /// game's own ItemOre.cs:29-31/168 always resolves these to the metal half via
-        /// Split('_')[1] / prefix-strip, e.g. for smashing ore into nuggets) and
-        /// olivine_peridot (NOT a two-substance pairing -- "peridot" is just the gem-quality
-        /// name for olivine, not a separate material, and has no entry of its own in the
-        /// material map). Preferring the second segment when it resolves, falling back to the
-        /// first otherwise, satisfies all four real cases without hardcoding them individually.
-        /// </summary>
-        private static string ResolveJointMaterial(string type)
-        {
-            int underscoreIdx = type.IndexOf('_');
-            if (underscoreIdx < 0)
-                return type;
-
-            string first = type.Substring(0, underscoreIdx);
-            string second = type.Substring(underscoreIdx + 1);
-
-            return MaterialToAsset(second) != null ? second : first;
-        }
-
-        private static string MaterialToAsset(string material)
-        {
-            switch (material)
-            {
-                case "galena": return "oresong-galena";
-                case "lignite":
-                case "bituminouscoal":
-                case "anthracite": return "oresong-coal";
-                case "nativegold": return "oresong-nativegold";
-                case "nativesilver": return "oresong-nativesilver";
-                case "nativecopper":
-                case "malachite": return "oresong-nativecopper";
-                case "sphalerite":
-                case "bismuthinite": return "oresong-sphalerite";
-                case "cassiterite": return "oresong-cassiterite";
-                case "chromite":
-                case "ilmenite": return "oresong-chromite";
-                case "limonite":
-                case "hematite":
-                case "magnetite": return "oresong-iron";
-                case "quartz":
-                case "diamond":
-                case "emerald":
-                case "olivine": return "oresong-quartzgem";
-                default: return null;
-            }
-        }
-
-        private static float ComputeGradeGain(Block block)
-        {
-            switch (block.Variant["grade"])
-            {
-                case "poor": return 0.55f;
-                case "medium": return 0.75f;
-                case "rich": return 0.9f;
-                case "bountiful": return 1.0f;
-            }
-
-            switch (block.Variant["potential"])
-            {
-                case "low": return 0.6f;
-                case "medium": return 0.8f;
-                case "high": return 1.0f;
-            }
-
-            return 0.75f;
-        }
+    private sealed class ListeningSession
+    {
+        internal IServerPlayer Player = null!;
+        internal int Id;
+        internal BlockPos Wall = null!;
+        internal Vec3d Origin = null!;
+        internal long StartedMs, AnsweredMs;
+        internal DwarfOreSongIndex.Query Query = null!;
     }
 }

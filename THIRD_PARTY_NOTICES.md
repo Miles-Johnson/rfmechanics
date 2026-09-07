@@ -22,22 +22,14 @@ Reproduction script: `tools/recolor_spitpacked.py` in this repository. It requir
 
 ### Ore-Song audio
 
-All ten files under `assets/rfmechanics/sounds/oresong/` blend procedural synthesis with the following game samples. Source paths are relative to the game's `assets/survival/sounds/`.
+The current 98 files under `assets/rfmechanics/sounds/oresong/` are original procedural
+synthesis, covered by the root MIT license. They contain no imported game samples.
+Reproduction: `tools/oresong/render_seated_oresong.py`; requires Python, NumPy, SciPy and ffmpeg.
 
-| Output suffix | Sample |
-| --- | --- |
-| galena | block/quern.ogg |
-| coal | block/charcoal2.ogg |
-| nativegold | effect/deepbell.ogg |
-| nativesilver | effect/deepbell.ogg |
-| nativecopper | block/heavymetal-hit.ogg |
-| sphalerite | block/glass.ogg |
-| cassiterite | block/rock-hit-pickaxe.ogg |
-| chromite | block/rock-break-pickaxe.ogg |
-| iron | block/anvil2.ogg |
-| quartzgem | walk/glass2.ogg |
-
-Reproduction script and tuning documentation: `tools/oresong/`. Requires Python, NumPy, SciPy, ffmpeg and a legitimate game installation; do not redistribute the game input files.
+The historical `tools/oresong/render_oresong.py` mixed game samples into ten v1 cues.
+Those cues have been removed from the current package. That historical renderer now
+writes outside shipped assets, under `tools/oresong/wav/legacy-v1/`. Its game-derived
+outputs still require Anego's applicable asset terms; do not redistribute its game inputs.
 
 ## Research references
 
